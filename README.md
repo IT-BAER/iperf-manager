@@ -15,7 +15,7 @@ A distributed iperf3 network performance testing system with a real-time GUI das
 - **Profile Management** -- Save, load, and delete test configurations
 - **HTML Reports** -- Generate reports with embedded throughput/jitter/loss charts
 - **CSV Export** -- Wide-format metrics export for further analysis
-- **Dark / Light Theme** -- Dracula color palette with theme toggle
+- **Dark / Light Theme** -- Dracula color palette with theme toggle (`Ctrl+T`)
 - **Headless Mode** -- Run agents without GUI for server/daemon deployment
 - **CLI Controller** -- Config-driven headless test execution for CI/automation
 
@@ -100,10 +100,17 @@ python main_dashboard.py
 | Bind Host | `0.0.0.0` | Interface to listen on |
 | Port | `9001` | REST API port |
 | Advertise MGMT IP | auto-detect | IP shown in discovery responses |
+| iperf3 Path | auto-detect | Path to iperf3 binary (use **Browse** to select) |
 | Autostart Ports | `5211,5212` | iperf3 server ports to start automatically |
 | API Token | *(empty)* | Optional `X-API-Key` header for authentication |
 
 Agent config is persisted to `%LOCALAPPDATA%\iperf3-agent\config.json`.
+
+## Keyboard Shortcuts
+
+| Shortcut | Scope | Action |
+|----------|-------|--------|
+| `Ctrl+T` | Dashboard / Agent | Toggle dark/light theme |
 
 ## Agent REST API
 
