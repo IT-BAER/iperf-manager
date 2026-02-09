@@ -42,7 +42,13 @@ class _TimeAxisItem(pg.AxisItem):
     """X-axis that displays epoch timestamps as HH:MM:SS."""
 
     def tickStrings(self, values, scale, spacing):
-        return [time.strftime("%H:%M:%S", time.localtime(v)) for v in values]
+        result = []
+        for v in values:
+            try:
+                result.append(time.strftime("%H:%M:%S", time.localtime(v)))
+            except (OSError, OverflowError, ValueError):
+                result.append("")
+        return result
 
 
 class _SmartYAxisItem(pg.AxisItem):
