@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.spec.bak
+
+# PyInstaller
+release/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Data (runtime outputs)
+data/*.csv
+data/*.log
+data/*.html
+data/*.png
+
+# iperf3 binaries (download separately)
+iperf3.exe
+cygwin1.dll
+cygz.dll
+cygcrypto-3.dll
+
+# User-specific data
+data/last_profile.json
+
+# Claude Code local config
+.claude/
+
+# Temp files
+_tmp_*.json
+*.tmp
