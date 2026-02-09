@@ -68,14 +68,14 @@ class AgentWindow(QMainWindow):
         self.edit_adv_ip.setPlaceholderText('auto-detect')
         self.edit_adv_ip.setMaximumWidth(160)
         adv_row.addWidget(self.edit_adv_ip)
-        adv_row.addWidget(QLabel('(Discover/Status에 표시됨)'))
+        adv_row.addWidget(QLabel('(Shown in Discover/Status)'))
         adv_row.addStretch()
         form.addRow('Advertise MGMT IP', adv_row)
 
         # iperf3 path
         self.edit_iperf3 = QLineEdit()
         self.edit_iperf3.setPlaceholderText('auto-detect')
-        form.addRow('iperf3 경로', self.edit_iperf3)
+        form.addRow('iperf3 Path', self.edit_iperf3)
 
         # Autostart ports
         self.edit_autostart = QLineEdit('5211,5212')
@@ -225,7 +225,7 @@ class AgentWindow(QMainWindow):
 
     def start_service(self):
         if self.service:
-            QMessageBox.information(self, 'Info', '이미 실행 중입니다.')
+            QMessageBox.information(self, 'Info', 'Service is already running.')
             return
         self._save_and_start()
 
@@ -244,7 +244,7 @@ class AgentWindow(QMainWindow):
 
     def open_status(self):
         if not self.service:
-            QMessageBox.warning(self, 'Agent', '먼저 Start Service를 실행하세요.')
+            QMessageBox.warning(self, 'Agent', 'Start the service first.')
             return
         webbrowser.open(self.service.base_url() + '/status')
 
@@ -257,7 +257,7 @@ class AgentWindow(QMainWindow):
         clipboard = QApplication.clipboard()
         if clipboard:
             clipboard.setText(url)
-        QMessageBox.information(self, 'Clipboard', f'복사됨: {url}')
+        QMessageBox.information(self, 'Clipboard', f'Copied: {url}')
 
     def closeEvent(self, event):
         try:
