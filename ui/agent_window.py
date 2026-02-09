@@ -15,7 +15,7 @@ from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QFormLayout, QHBoxLayout, QVBoxLayout,
     QLineEdit, QSpinBox, QPushButton, QLabel, QListWidget, QMessageBox,
-    QApplication,
+    QApplication, QFileDialog,
 )
 
 from core.agent_service import AgentService, load_agent_cfg, save_agent_cfg
@@ -73,9 +73,15 @@ class AgentWindow(QMainWindow):
         form.addRow('Advertise MGMT IP', adv_row)
 
         # iperf3 path
+        iperf_row = QHBoxLayout()
         self.edit_iperf3 = QLineEdit()
         self.edit_iperf3.setPlaceholderText('auto-detect')
-        form.addRow('iperf3 Path', self.edit_iperf3)
+        iperf_row.addWidget(self.edit_iperf3)
+        btn_browse = QPushButton('Browse...')
+        btn_browse.setFixedWidth(90)
+        btn_browse.clicked.connect(self._browse_iperf3)
+        iperf_row.addWidget(btn_browse)
+        form.addRow('iperf3 Path', iperf_row)
 
         # Autostart ports
         self.edit_autostart = QLineEdit('5211,5212')
@@ -258,6 +264,14 @@ class AgentWindow(QMainWindow):
         if clipboard:
             clipboard.setText(url)
         QMessageBox.information(self, 'Clipboard', f'Copied: {url}')
+
+    def _browse_iperf3(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, 'Select iperf3 executable', '',
+            'Executables (*.exe);;All Files (*)',
+        )
+        if path:
+            self.edit_iperf3.setText(path)
 
     def closeEvent(self, event):
         try:
