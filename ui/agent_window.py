@@ -12,6 +12,7 @@ import threading
 import webbrowser
 
 from PySide6.QtCore import QTimer, Signal
+from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QFormLayout, QHBoxLayout, QVBoxLayout,
     QLineEdit, QSpinBox, QPushButton, QLabel, QListWidget, QMessageBox,
@@ -33,7 +34,9 @@ class AgentWindow(QMainWindow):
         self.resize(560, 400)
 
         self.service: AgentService | None = None
+        self._is_dark_theme = True
         self._build_ui()
+        self._build_menu()
         self._load_config()
         self._setup_timer()
         self._start_succeeded.connect(self._on_start_succeeded)
@@ -264,6 +267,25 @@ class AgentWindow(QMainWindow):
         if clipboard:
             clipboard.setText(url)
         QMessageBox.information(self, 'Clipboard', f'Copied: {url}')
+
+    def _build_menu(self):
+        menu = self.menuBar()
+        view_menu = menu.addMenu('View')
+        self._theme_action = QAction('Switch to Light Theme  (Ctrl+T)', self)
+        self._theme_action.setShortcut(QKeySequence('Ctrl+T'))
+        self._theme_action.triggered.connect(self._toggle_theme)
+        view_menu.addAction(self._theme_action)
+
+    def _toggle_theme(self):
+        self._is_dark_theme = not self._is_dark_theme
+        name = 'dark' if self._is_dark_theme else 'light'
+        try:
+            from ui.theme import load_theme
+            QApplication.instance().setStyleSheet(load_theme(name))
+            label = 'Switch to Light Theme  (Ctrl+T)' if self._is_dark_theme else 'Switch to Dark Theme  (Ctrl+T)'
+            self._theme_action.setText(label)
+        except Exception:
+            pass
 
     def _browse_iperf3(self):
         path, _ = QFileDialog.getOpenFileName(

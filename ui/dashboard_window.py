@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from PySide6.QtCore import QThread, QTimer, Qt, Signal, Slot
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QHBoxLayout, QMainWindow, QMenuBar,
     QMessageBox, QSplitter, QTabWidget, QVBoxLayout, QWidget,
@@ -142,7 +142,8 @@ class DashboardWindow(QMainWindow):
         # Menu bar
         menu = self.menuBar()
         view_menu = menu.addMenu('View')
-        self._theme_action = QAction('Switch to Light Theme', self)
+        self._theme_action = QAction('Switch to Light Theme  (Ctrl+T)', self)
+        self._theme_action.setShortcut(QKeySequence('Ctrl+T'))
         self._theme_action.triggered.connect(self._toggle_theme)
         view_menu.addAction(self._theme_action)
 
@@ -468,7 +469,7 @@ class DashboardWindow(QMainWindow):
             from ui.theme import load_theme
             QApplication.instance().setStyleSheet(load_theme(name))
             self._chart.set_theme(self._is_dark_theme)
-            label = 'Switch to Light Theme' if self._is_dark_theme else 'Switch to Dark Theme'
+            label = 'Switch to Light Theme  (Ctrl+T)' if self._is_dark_theme else 'Switch to Dark Theme  (Ctrl+T)'
             self._theme_action.setText(label)
         except Exception as e:
             self._log.append_log(f'Theme switch failed: {e}')
