@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>iperf-manager Dashboard</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>">
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<!-- ═══ Header ═══════════════════════════════════════════════════ -->
+<header class="header">
+    <div class="header__brand">
+        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+        iperf-manager
+        <span class="text-dim text-sm">v{{ version }}</span>
+    </div>
+    <div class="header__right">
+        <!-- Profile controls -->
+        <select id="profileSelect" title="Load profile">
+            <option value="">— Profiles —</option>
+        </select>
+        <button class="btn btn--sm" onclick="loadSelectedProfile()" title="Load">Load</button>
+        <button class="btn btn--sm" onclick="promptSaveProfile()" title="Save current config">Save</button>
+        <button class="btn btn--sm" onclick="deleteSelectedProfile()" title="Delete">Del</button>
+
+        <div class="conn-indicator">
+            <div class="conn-dot" id="connDot"></div>
+            <span id="connLabel">Disconnected</span>
+        </div>
+    </div>
+</header>
+
+<!-- ═══ Dashboard Grid ═══════════════════════════════════════════ -->
+<div class="dashboard">
+
+    <!-- ─── Sidebar ──────────────────────────────────────────── -->
+    <aside class="sidebar">
+        <!-- Agents -->
+        <div class="sidebar__section">
+            <div class="sidebar__title">
+                Agents
+                <span>
+                    <button class="btn btn--sm" onclick="discoverAgents()" title="UDP broadcast discover">Discover</button>
+                    <button class="btn btn--sm" onclick="showAddAgentModal()" title="Add agent manually">+ Add</button>
+                </span>
+            </div>
+            <ul class="agent-list" id="agentList">
+                <li class="agent-empty" id="agentEmpty">No agents — click Discover or Add</li>
+            </ul>
+        </div>
+
+        <!-- Reports -->
+        <div class="sidebar__section">
+            <div class="sidebar__title">
+                Reports &amp; Files
+                <button class="btn btn--sm" onclick="refreshReports()">↻</button>
+            </div>
+            <ul class="reports-list" id="reportsList">
+                <li class="text-dim text-sm">No files yet</li>
+            </ul>
+        </div>
+    </aside>
+
+    <!-- ─── Main Area ────────────────────────────────────────── -->
+    <main class="main-area">
+
+        <!-- Test Config Card -->
+        <div class="card">
+            <div class="card__head">
+                Test Configuration
+                <div class="flex items-center gap-sm">
+                    <span class="test-status-badge idle" id="testBadge">● Idle</span>
+                </div>
+            </div>
+            <div class="card__body">
+                <!-- Server row -->
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="serverAgent">Server Agent</label>
+                        <select id="serverAgent"><option value="">— Select agent —</option></select>
+                    </div>
+                    <div class="form-group">
+                        <label for="serverBind">Server Bind IP</label>
+                        <input id="serverBind" placeholder="e.g. 192.168.1.100">
+                    </div>
+                    <div class="form-group">
+                        <label for="apiKey">API Key</label>
+                        <input id="apiKey" type="password" placeholder="optional">
+                    </div>
+                </div>
+
+                <!-- Test parameters -->
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="duration">Duration (s)</label>
+                        <input id="duration" type="number" value="30" min="1">
+                    </div>
+                    <div class="form-group">
+                        <label for="basePort">Base Port</label>
+                        <input id="basePort" type="number" value="5211" min="1024">
+                    </div>
+                    <div class="form-group">
+                        <label for="pollInterval">Poll Interval (s)</label>
+                        <input id="pollInterval" type="number" value="1.0" min="0.2" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label for="proto">Protocol</label>
+                        <select id="proto">
+                            <option value="tcp">TCP</option>
+                            <option value="udp">UDP</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="parallel">Parallel (-P)</label>
+                        <input id="parallel" type="number" value="1" min="1">
+                    </div>
+                    <div class="form-group">
+                        <label for="omit">Omit (-O)</label>
+                        <input id="omit" type="number" value="1" min="0">
+                    </div>
+                </div>
+
+                <!-- Advanced -->
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="bitrate">Bitrate (-b)</label>
+                        <input id="bitrate" placeholder="e.g. 100M">
+                    </div>
+                    <div class="form-group">
+                        <label for="tcpWindow">Window (-w)</label>
+                        <input id="tcpWindow" placeholder="e.g. 128K">
+                    </div>
+                </div>
+
+                <!-- Test Mode -->
+                <div class="form-group mb-1">
+                    <label>Test Mode</label>
+                    <div class="mode-group">
+                        <input type="radio" name="mode" id="mode_bidir" value="bidir" checked>
+                        <label for="mode_bidir">Bidir</label>
+                        <input type="radio" name="mode" id="mode_up" value="up_only">
+                        <label for="mode_up">Up Only</label>
+                        <input type="radio" name="mode" id="mode_dn" value="down_only">
+                        <label for="mode_dn">Down Only</label>
+                        <input type="radio" name="mode" id="mode_dual" value="dual">
+                        <label for="mode_dual">Dual</label>
+                        <input type="radio" name="mode" id="mode_2p" value="two_phase">
+                        <label for="mode_2p">Two-Phase</label>
+                    </div>
+                </div>
+
+                <!-- Clients Table -->
+                <div class="flex justify-between items-center mb-1">
+                    <label style="margin:0">Clients</label>
+                    <button class="btn btn--sm btn--success" onclick="addClientRow()">+ Add Client</button>
+                </div>
+                <div style="overflow-x:auto">
+                    <table class="clients-table" id="clientsTable">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Agent</th>
+                                <th>Target IP</th>
+                                <th>Proto</th>
+                                <th>Parallel</th>
+                                <th>Bidir</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="clientsBody"></tbody>
+                    </table>
+                </div>
+
+                <!-- Controls -->
+                <div class="test-controls">
+                    <button class="btn btn--success" id="btnStart" onclick="startTest()">▶ Start Test</button>
+                    <button class="btn btn--danger hidden" id="btnStop" onclick="stopTest()">■ Stop Test</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Live Stats Bar -->
+        <div class="stats-bar hidden" id="statsBar">
+            <div class="stat-item">
+                <div class="stat-label">Upload</div>
+                <div class="stat-value up" id="statUp">0.0</div>
+                <div class="stat-label">Mbps</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Download</div>
+                <div class="stat-value dn" id="statDn">0.0</div>
+                <div class="stat-label">Mbps</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Total</div>
+                <div class="stat-value" id="statTotal">0.0</div>
+                <div class="stat-label">Mbps</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Elapsed</div>
+                <div class="stat-value" id="statElapsed" style="font-size:1.1rem">0s</div>
+                <div class="stat-label">&nbsp;</div>
+            </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="charts-grid hidden" id="chartsPanel">
+            <div class="chart-wrap">
+                <div class="chart-title">Total Throughput</div>
+                <canvas id="chartTotal"></canvas>
+            </div>
+            <div class="chart-wrap">
+                <div class="chart-title">Per-Client Throughput</div>
+                <canvas id="chartClients"></canvas>
+            </div>
+        </div>
+
+        <!-- Log Panel -->
+        <div class="card">
+            <div class="card__head">
+                Test Log
+                <button class="btn btn--sm" onclick="clearLog()">Clear</button>
+            </div>
+            <div class="card__body">
+                <div class="log-output" id="logOutput">Ready.\n</div>
+            </div>
+        </div>
+
+    </main>
+</div>
+
+<!-- ═══ Add Agent Modal ══════════════════════════════════════════ -->
+<div class="modal-overlay" id="addAgentModal">
+    <div class="modal">
+        <h3>Add Agent</h3>
+        <div class="form-group">
+            <label for="agentUrl">Agent URL</label>
+            <input id="agentUrl" placeholder="http://192.168.1.10:9001">
+        </div>
+        <div class="form-group">
+            <label for="agentName">Name (optional)</label>
+            <input id="agentName" placeholder="e.g. Host-A">
+        </div>
+        <div class="form-group">
+            <label for="agentApiKey">API Key (optional)</label>
+            <input id="agentApiKey" type="password" placeholder="">
+        </div>
+        <div class="modal__actions">
+            <button class="btn" onclick="hideAddAgentModal()">Cancel</button>
+            <button class="btn btn--primary" onclick="addAgent()">Add</button>
+        </div>
+    </div>
+</div>
+
+<!-- ═══ Save Profile Modal ═══════════════════════════════════════ -->
+<div class="modal-overlay" id="saveProfileModal">
+    <div class="modal">
+        <h3>Save Profile</h3>
+        <div class="form-group">
+            <label for="profileName">Profile Name</label>
+            <input id="profileName" placeholder="my-test-profile">
+        </div>
+        <div class="modal__actions">
+            <button class="btn" onclick="hideSaveProfileModal()">Cancel</button>
+            <button class="btn btn--primary" onclick="saveProfile()">Save</button>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<script>
+// ── State ──────────────────────────────────────────────────────────
+const agents = {};          // {id: {id, url, name, status, ...}}
+let testRunning = false;
+let testStartTime = null;
+let elapsedTimer = null;
+
+// Chart instances
+let totalChart = null;
+let clientChart = null;
+const MAX_POINTS = 120;
+
+// ── Socket.IO ──────────────────────────────────────────────────────
+const socket = io({ transports: ['websocket', 'polling'] });
+
+socket.on('connect', () => {
+    document.getElementById('connDot').classList.add('connected');
+    document.getElementById('connLabel').textContent = 'Connected';
+    appendLog('[ws] Connected to server');
+});
+
+socket.on('disconnect', () => {
+    document.getElementById('connDot').classList.remove('connected');
+    document.getElementById('connLabel').textContent = 'Disconnected';
+});
+
+socket.on('status', (data) => {
+    if (data.test && data.test.status === 'running') {
+        setTestState('running');
+    }
+});
+
+socket.on('test_started', (data) => {
+    appendLog('[test] Started');
+    setTestState('running');
+    testStartTime = Date.now();
+    initCharts();
+});
+
+socket.on('test_completed', (data) => {
+    appendLog('[test] Completed' + (data.error ? ' with error: ' + data.error : ''));
+    setTestState('idle');
+    refreshReports();
+});
+
+socket.on('test_error', (data) => {
+    appendLog('[test] ERROR: ' + data.message, 'error');
+});
+
+socket.on('test_log', (data) => {
+    const cls = data.message.includes('error') ? 'error' :
+                data.message.includes('OK') ? 'ok' : '';
+    appendLog(data.message, cls);
+});
+
+socket.on('metrics', (data) => {
+    updateStats(data);
+    updateCharts(data);
+});
+
+socket.on('agents_update', (list) => {
+    list.forEach(a => { agents[a.id] = a; });
+    renderAgents();
+});
+
+
+// ── Charts ─────────────────────────────────────────────────────────
+const chartDefaults = {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: 0 },
+    scales: {
+        x: {
+            display: true,
+            ticks: { color: '#8892a4', maxTicksLimit: 10, font: { size: 10 } },
+            grid: { color: 'rgba(42,58,92,0.4)' },
+        },
+        y: {
+            display: true,
+            title: { display: true, text: 'Mbps', color: '#8892a4', font: { size: 11 } },
+            ticks: { color: '#8892a4', font: { size: 10 } },
+            grid: { color: 'rgba(42,58,92,0.4)' },
+            beginAtZero: true,
+        }
+    },
+    plugins: {
+        legend: { labels: { color: '#e0e0e0', font: { size: 11 } } }
+    }
+};
+
+function initCharts() {
+    document.getElementById('chartsPanel').classList.remove('hidden');
+    document.getElementById('statsBar').classList.remove('hidden');
+
+    // Destroy old
+    if (totalChart) totalChart.destroy();
+    if (clientChart) clientChart.destroy();
+
+    totalChart = new Chart(document.getElementById('chartTotal'), {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [
+                { label: 'Upload', data: [], borderColor: '#2ecc71', backgroundColor: 'rgba(46,204,113,.1)', fill: true, tension: 0.3, pointRadius: 0 },
+                { label: 'Download', data: [], borderColor: '#3498db', backgroundColor: 'rgba(52,152,219,.1)', fill: true, tension: 0.3, pointRadius: 0 },
+            ]
+        },
+        options: { ...chartDefaults }
+    });
+
+    clientChart = new Chart(document.getElementById('chartClients'), {
+        type: 'line',
+        data: { labels: [], datasets: [] },
+        options: { ...chartDefaults }
+    });
+}
+
+const clientColors = ['#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd','#8c564b','#e377c2','#7f7f7f','#bcbd22','#17becf'];
+let knownClients = new Set();
+
+function updateCharts(data) {
+    if (!totalChart) return;
+
+    const ts = new Date(data.timestamp * 1000).toLocaleTimeString();
+
+    // Total chart
+    totalChart.data.labels.push(ts);
+    totalChart.data.datasets[0].data.push(data.total_up);
+    totalChart.data.datasets[1].data.push(data.total_dn);
+    if (totalChart.data.labels.length > MAX_POINTS) {
+        totalChart.data.labels.shift();
+        totalChart.data.datasets.forEach(ds => ds.data.shift());
+    }
+    totalChart.update('none');
+
+    // Per-client chart
+    clientChart.data.labels.push(ts);
+    if (clientChart.data.labels.length > MAX_POINTS) {
+        clientChart.data.labels.shift();
+        clientChart.data.datasets.forEach(ds => ds.data.shift());
+    }
+
+    if (data.clients) {
+        Object.entries(data.clients).forEach(([name, m], idx) => {
+            // Add datasets dynamically for new clients
+            if (!knownClients.has(name)) {
+                knownClients.add(name);
+                const ci = (knownClients.size - 1) % clientColors.length;
+                clientChart.data.datasets.push({
+                    label: name + ' ↑',
+                    data: new Array(clientChart.data.labels.length - 1).fill(null),
+                    borderColor: clientColors[ci],
+                    borderDash: [],
+                    tension: 0.3, pointRadius: 0, fill: false,
+                });
+                clientChart.data.datasets.push({
+                    label: name + ' ↓',
+                    data: new Array(clientChart.data.labels.length - 1).fill(null),
+                    borderColor: clientColors[ci],
+                    borderDash: [5, 3],
+                    tension: 0.3, pointRadius: 0, fill: false,
+                });
+            }
+            // Find dataset index
+            const upIdx = clientChart.data.datasets.findIndex(d => d.label === name + ' ↑');
+            const dnIdx = clientChart.data.datasets.findIndex(d => d.label === name + ' ↓');
+            if (upIdx >= 0) clientChart.data.datasets[upIdx].data.push(m.up);
+            if (dnIdx >= 0) clientChart.data.datasets[dnIdx].data.push(m.dn);
+        });
+    }
+    clientChart.update('none');
+}
+
+function updateStats(data) {
+    document.getElementById('statUp').textContent = data.total_up.toFixed(1);
+    document.getElementById('statDn').textContent = data.total_dn.toFixed(1);
+    document.getElementById('statTotal').textContent = (data.total_up + data.total_dn).toFixed(1);
+}
+
+
+// ── Test State ─────────────────────────────────────────────────────
+function setTestState(state) {
+    testRunning = state === 'running';
+    const badge = document.getElementById('testBadge');
+    const btnStart = document.getElementById('btnStart');
+    const btnStop = document.getElementById('btnStop');
+
+    if (state === 'running') {
+        badge.className = 'test-status-badge running';
+        badge.textContent = '● Running';
+        btnStart.classList.add('hidden');
+        btnStop.classList.remove('hidden');
+        testStartTime = testStartTime || Date.now();
+        if (elapsedTimer) clearInterval(elapsedTimer);
+        elapsedTimer = setInterval(() => {
+            const s = Math.floor((Date.now() - testStartTime) / 1000);
+            document.getElementById('statElapsed').textContent = s + 's';
+        }, 1000);
+    } else if (state === 'stopping') {
+        badge.className = 'test-status-badge stopping';
+        badge.textContent = '● Stopping';
+        btnStop.disabled = true;
+    } else {
+        badge.className = 'test-status-badge idle';
+        badge.textContent = '● Idle';
+        btnStart.classList.remove('hidden');
+        btnStop.classList.add('hidden');
+        btnStop.disabled = false;
+        if (elapsedTimer) clearInterval(elapsedTimer);
+        testStartTime = null;
+        knownClients = new Set();
+    }
+}
+
+
+// ── API Calls ──────────────────────────────────────────────────────
+async function api(method, url, body) {
+    const opts = { method, headers: { 'Content-Type': 'application/json' } };
+    if (body !== undefined) opts.body = JSON.stringify(body);
+    const res = await fetch(url, opts);
+    return res.json();
+}
+
+// Agents
+async function discoverAgents() {
+    appendLog('[agents] Discovering via UDP broadcast...');
+    const data = await api('POST', '/api/agents/discover');
+    appendLog(`[agents] Found ${data.discovered} agent(s)`);
+    if (data.agents) {
+        data.agents.forEach(a => { agents[a.id] = a; });
+        renderAgents();
+    }
+}
+
+async function addAgent() {
+    const url = document.getElementById('agentUrl').value.trim();
+    const name = document.getElementById('agentName').value.trim();
+    const apiKey = document.getElementById('agentApiKey').value.trim();
+    if (!url) return;
+    const data = await api('POST', '/api/agents', { url, name, api_key: apiKey });
+    agents[data.id] = data;
+    renderAgents();
+    hideAddAgentModal();
+    appendLog(`[agents] Added ${data.name} (${data.status})`);
+}
+
+async function removeAgent(id) {
+    await api('DELETE', `/api/agents/${id}`);
+    delete agents[id];
+    renderAgents();
+}
+
+async function refreshAgents() {
+    const list = await api('GET', '/api/agents?refresh=1');
+    list.forEach(a => { agents[a.id] = a; });
+    renderAgents();
+}
+
+function renderAgents() {
+    const el = document.getElementById('agentList');
+    const empty = document.getElementById('agentEmpty');
+    const keys = Object.keys(agents);
+
+    if (keys.length === 0) {
+        el.innerHTML = '<li class="agent-empty">No agents — click Discover or Add</li>';
+    } else {
+        el.innerHTML = keys.map(id => {
+            const a = agents[id];
+            const st = a.status || 'unknown';
+            return `<li class="agent-item">
+                <span class="agent-dot ${st}"></span>
+                <div class="agent-info">
+                    <div class="agent-name">${esc(a.name)}</div>
+                    <div class="agent-url">${esc(a.url)}</div>
+                </div>
+                <button class="agent-remove" onclick="removeAgent('${id}')" title="Remove">✕</button>
+            </li>`;
+        }).join('');
+    }
+    updateAgentDropdowns();
+}
+
+function updateAgentDropdowns() {
+    const keys = Object.keys(agents);
+    const opts = '<option value="">— Select —</option>' +
+        keys.map(id => `<option value="${esc(agents[id].url)}">${esc(agents[id].name)}</option>`).join('');
+    document.getElementById('serverAgent').innerHTML = opts;
+    document.querySelectorAll('.client-agent-select').forEach(sel => {
+        const cur = sel.value;
+        sel.innerHTML = opts;
+        sel.value = cur;
+    });
+}
+
+// Clients table
+let clientCounter = 0;
+
+function addClientRow(data) {
+    clientCounter++;
+    const tbody = document.getElementById('clientsBody');
+    const tr = document.createElement('tr');
+    tr.dataset.idx = clientCounter;
+    tr.innerHTML = `
+        <td><input class="client-name" value="${esc(data?.name || 'Client-' + clientCounter)}" style="width:100px"></td>
+        <td><select class="client-agent-select" style="width:160px">
+            <option value="">— Select —</option>
+            ${Object.keys(agents).map(id => `<option value="${esc(agents[id].url)}">${esc(agents[id].name)}</option>`).join('')}
+        </select></td>
+        <td><input class="client-target" value="${esc(data?.target || '')}" placeholder="192.168.x.x" style="width:130px"></td>
+        <td><select class="client-proto" style="width:70px">
+            <option value="" ${!data?.proto ? 'selected' : ''}>—</option>
+            <option value="tcp" ${data?.proto === 'tcp' ? 'selected' : ''}>TCP</option>
+            <option value="udp" ${data?.proto === 'udp' ? 'selected' : ''}>UDP</option>
+        </select></td>
+        <td><input class="client-parallel" type="number" value="${data?.parallel || ''}" min="1" style="width:55px"></td>
+        <td class="checkbox-cell"><input class="client-bidir" type="checkbox" ${data?.bidir ? 'checked' : ''}></td>
+        <td><button class="btn btn--sm btn--danger btn--icon" onclick="this.closest('tr').remove()" title="Remove">✕</button></td>
+    `;
+    tbody.appendChild(tr);
+    // Set agent value after appending
+    if (data?.agent) {
+        tr.querySelector('.client-agent-select').value = data.agent;
+    }
+}
+
+// Build config from form
+function buildConfig() {
+    const mode = document.querySelector('input[name="mode"]:checked')?.value || 'bidir';
+    const clients = [];
+    document.querySelectorAll('#clientsBody tr').forEach(tr => {
+        clients.push({
+            name: tr.querySelector('.client-name').value || 'unnamed',
+            agent: tr.querySelector('.client-agent-select').value,
+            target: tr.querySelector('.client-target').value,
+            proto: tr.querySelector('.client-proto').value || undefined,
+            parallel: parseInt(tr.querySelector('.client-parallel').value) || undefined,
+            bidir: tr.querySelector('.client-bidir').checked || undefined,
+        });
+    });
+
+    return {
+        server: {
+            agent: document.getElementById('serverAgent').value,
+            bind: document.getElementById('serverBind').value,
+        },
+        clients,
+        mode,
+        duration_sec: parseInt(document.getElementById('duration').value) || 30,
+        base_port: parseInt(document.getElementById('basePort').value) || 5211,
+        poll_interval_sec: parseFloat(document.getElementById('pollInterval').value) || 1.0,
+        proto: document.getElementById('proto').value,
+        parallel: parseInt(document.getElementById('parallel').value) || 1,
+        omit: parseInt(document.getElementById('omit').value) || 0,
+        bitrate: document.getElementById('bitrate').value || undefined,
+        tcp_window: document.getElementById('tcpWindow').value || undefined,
+        api_key: document.getElementById('apiKey').value || undefined,
+    };
+}
+
+// Populate form from config
+function loadConfig(cfg) {
+    if (cfg.server) {
+        document.getElementById('serverAgent').value = cfg.server.agent || '';
+        document.getElementById('serverBind').value = cfg.server.bind || '';
+    }
+    if (cfg.server_agent) {
+        document.getElementById('serverAgent').value = cfg.server_agent || '';
+    }
+    if (cfg.server_bind) {
+        document.getElementById('serverBind').value = cfg.server_bind || '';
+    }
+    document.getElementById('duration').value = cfg.duration_sec || 30;
+    document.getElementById('basePort').value = cfg.base_port || 5211;
+    document.getElementById('pollInterval').value = cfg.poll_interval_sec || 1.0;
+    document.getElementById('proto').value = cfg.proto || 'tcp';
+    document.getElementById('parallel').value = cfg.parallel || 1;
+    document.getElementById('omit').value = cfg.omit ?? 1;
+    document.getElementById('bitrate').value = cfg.bitrate || '';
+    document.getElementById('tcpWindow').value = cfg.tcp_window || '';
+    document.getElementById('apiKey').value = cfg.api_key || '';
+
+    const mode = cfg.mode || 'bidir';
+    const radio = document.querySelector(`input[name="mode"][value="${mode}"]`);
+    if (radio) radio.checked = true;
+
+    // Clients
+    document.getElementById('clientsBody').innerHTML = '';
+    clientCounter = 0;
+    if (cfg.clients) {
+        cfg.clients.forEach(c => addClientRow(c));
+    }
+}
+
+// Test control
+async function startTest() {
+    const cfg = buildConfig();
+    if (!cfg.server?.agent) {
+        alert('Select a server agent first.');
+        return;
+    }
+    if (!cfg.clients || cfg.clients.length === 0) {
+        alert('Add at least one client.');
+        return;
+    }
+    appendLog('[test] Starting...');
+    setTestState('running');
+    try {
+        await api('POST', '/api/test/start', cfg);
+    } catch (e) {
+        appendLog('[test] Failed to start: ' + e.message, 'error');
+        setTestState('idle');
+    }
+}
+
+async function stopTest() {
+    appendLog('[test] Stopping...');
+    setTestState('stopping');
+    await api('POST', '/api/test/stop');
+}
+
+// Profiles
+async function refreshProfiles() {
+    const list = await api('GET', '/api/profiles');
+    const sel = document.getElementById('profileSelect');
+    sel.innerHTML = '<option value="">— Profiles —</option>' +
+        list.map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join('');
+}
+
+async function loadSelectedProfile() {
+    const name = document.getElementById('profileSelect').value;
+    if (!name) return;
+    const data = await api('GET', `/api/profiles/${encodeURIComponent(name)}`);
+    if (data.config) {
+        loadConfig(data.config);
+        appendLog(`[profile] Loaded: ${name}`);
+    }
+}
+
+function promptSaveProfile() {
+    document.getElementById('profileName').value = '';
+    document.getElementById('saveProfileModal').classList.add('active');
+    document.getElementById('profileName').focus();
+}
+
+function hideSaveProfileModal() {
+    document.getElementById('saveProfileModal').classList.remove('active');
+}
+
+async function saveProfile() {
+    const name = document.getElementById('profileName').value.trim();
+    if (!name) return;
+    const cfg = buildConfig();
+    await api('POST', '/api/profiles', { name, config: cfg });
+    appendLog(`[profile] Saved: ${name}`);
+    hideSaveProfileModal();
+    refreshProfiles();
+}
+
+async function deleteSelectedProfile() {
+    const name = document.getElementById('profileSelect').value;
+    if (!name) return;
+    if (!confirm(`Delete profile "${name}"?`)) return;
+    await api('DELETE', `/api/profiles/${encodeURIComponent(name)}`);
+    appendLog(`[profile] Deleted: ${name}`);
+    refreshProfiles();
+}
+
+// Reports
+async function refreshReports() {
+    const list = await api('GET', '/api/reports');
+    const el = document.getElementById('reportsList');
+    if (!list || list.length === 0) {
+        el.innerHTML = '<li class="text-dim text-sm">No files yet</li>';
+        return;
+    }
+    el.innerHTML = list.map(f => {
+        const size = f.size > 1024*1024 ? (f.size/1024/1024).toFixed(1) + ' MB' :
+                     f.size > 1024 ? (f.size/1024).toFixed(1) + ' KB' : f.size + ' B';
+        return `<li>
+            <a href="/api/reports/${encodeURIComponent(f.name)}" target="_blank">${esc(f.name)}</a>
+            <span class="file-size">${size}</span>
+        </li>`;
+    }).join('');
+}
+
+// Log
+function appendLog(msg, cls) {
+    const el = document.getElementById('logOutput');
+    const line = document.createElement('div');
+    line.className = 'log-line' + (cls ? ' ' + cls : '');
+    line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    el.appendChild(line);
+    el.scrollTop = el.scrollHeight;
+}
+
+function clearLog() {
+    document.getElementById('logOutput').innerHTML = '';
+}
+
+// Modals
+function showAddAgentModal() {
+    document.getElementById('agentUrl').value = '';
+    document.getElementById('agentName').value = '';
+    document.getElementById('agentApiKey').value = '';
+    document.getElementById('addAgentModal').classList.add('active');
+    document.getElementById('agentUrl').focus();
+}
+
+function hideAddAgentModal() {
+    document.getElementById('addAgentModal').classList.remove('active');
+}
+
+// Close modals on backdrop click
+document.querySelectorAll('.modal-overlay').forEach(ov => {
+    ov.addEventListener('click', e => {
+        if (e.target === ov) ov.classList.remove('active');
+    });
+});
+
+// Close modals on Escape
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+        document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
+    }
+});
+
+// Utility
+function esc(s) {
+    if (!s) return '';
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+
+// ── Init ───────────────────────────────────────────────────────────
+(async function init() {
+    await refreshProfiles();
+    await refreshReports();
+    // Add a default client row
+    addClientRow();
+    appendLog('[init] Dashboard ready');
+})();
+</script>
+
+</body>
+</html>
