@@ -21,7 +21,8 @@ def main():
     from web.app import app, socketio
 
     print(f"[iperf-manager] Starting web dashboard on http://{args.host}:{args.port}")
-    socketio.run(app, host=args.host, port=args.port, debug=args.debug)
+    socketio.run(app, host=args.host, port=args.port, debug=args.debug,
+                 allow_unsafe_werkzeug=True)
 
 
 if __name__ == "__main__":
