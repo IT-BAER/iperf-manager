@@ -10,8 +10,12 @@ export function LogPanel({ logs, onClear }: Props) {
   const endRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(true)
 
+  const prevLenRef = useRef(logs.length)
   useEffect(() => {
-    if (open) endRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (open && logs.length > prevLenRef.current) {
+      endRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+    prevLenRef.current = logs.length
   }, [logs.length, open])
 
   const colorClass = (type: LogEntry['type']) => {
@@ -37,26 +41,28 @@ export function LogPanel({ logs, onClear }: Props) {
         </div>
         <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
           <button onClick={onClear} className="btn btn-sm" disabled={logs.length === 0}>Clear</button>
-          <span className={`text-fg-3 text-sm transition-transform duration-150 ${open ? '' : '-rotate-90'}`}>▾</span>
+          <span className={`text-fg-3 transition-transform duration-150 ${open ? '' : '-rotate-90'}`}><i className="fa-solid fa-chevron-down text-[11px]" /></span>
         </div>
       </div>
-      {open && (
-        <div className="h-44 overflow-y-auto p-3 font-mono text-[12px] leading-5 bg-bg">
-          {logs.length === 0 ? (
-            <span className="text-fg-3">No log entries.</span>
-          ) : (
-            logs.map((entry, i) => (
-              <div key={i} className={colorClass(entry.type)}>
-                <span className="text-fg-4 select-none mr-2 tabular">
-                  [{new Date(entry.ts).toLocaleTimeString()}]
-                </span>
-                {entry.msg}
-              </div>
-            ))
-          )}
-          <div ref={endRef} />
+      <div className={`collapsible-grid ${open ? 'open' : 'closed'}`}>
+        <div className="collapsible-inner">
+          <div className="h-44 overflow-y-auto p-3 font-mono text-[12px] leading-5 bg-bg">
+            {logs.length === 0 ? (
+              <span className="text-fg-3">No log entries.</span>
+            ) : (
+              logs.map((entry, i) => (
+                <div key={i} className={colorClass(entry.type)}>
+                  <span className="text-fg-4 select-none mr-2 tabular">
+                    [{new Date(entry.ts).toLocaleTimeString()}]
+                  </span>
+                  {entry.msg}
+                </div>
+              ))
+            )}
+            <div ref={endRef} />
+          </div>
         </div>
-      )}
+      </div>
     </div>
   )
 }

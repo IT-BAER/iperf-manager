@@ -1,12 +1,16 @@
-import { useEffect, useRef, useCallback } from 'react'
-import { io, Socket } from 'socket.io-client'
+﻿import { useEffect, useRef, useCallback, useState } from 'react'
+import { io } from 'socket.io-client'
+import type { Socket } from 'socket.io-client'
 
 export function useSocket() {
   const ref = useRef<Socket | null>(null)
+  const [connected, setConnected] = useState(false)
 
   useEffect(() => {
-    const s = io({ transports: ['websocket', 'polling'] })
+    const s = io({ path: '/socket.io', transports: ['polling', 'websocket'] })
     ref.current = s
+    s.on('connect', () => setConnected(true))
+    s.on('disconnect', () => setConnected(false))
     return () => { s.disconnect() }
   }, [])
 
@@ -19,5 +23,5 @@ export function useSocket() {
     ref.current?.emit(ev, data)
   }, [])
 
-  return { on, emit }
+  return { on, emit, connected }
 }

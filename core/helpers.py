@@ -147,6 +147,81 @@ def list_local_ipv4(exclude_loopback: bool = True) -> list[str]:
     return sorted(list(ips))
 
 
+def list_local_interfaces(exclude_loopback: bool = True) -> list[dict]:
+    """Return list of ``{"iface": "eth0", "ip": "10.0.0.1"}`` dicts.
+
+    Tries ``ip -j addr`` (Linux), then ``ipconfig`` (Windows) for adapter names.
+    Falls back to IP-only entries from :func:`list_local_ipv4`.
+    """
+    results: list[dict] = []
+
+    # Linux: ``ip -j addr`` gives structured JSON
+    if not IS_WIN:
+        try:
+            import json as _json
+            raw = subprocess.check_output(
+                ['ip', '-j', 'addr'],
+                text=True, timeout=5,
+            )
+            data = _json.loads(raw)
+            for entry in data:
+                ifname = entry.get('ifname', '')
+                if exclude_loopback and ifname == 'lo':
+                    continue
+                for ai in entry.get('addr_info', []):
+                    if ai.get('family') != 'inet':
+                        continue
+                    ip = ai.get('local', '')
+                    if ip:
+                        results.append({'iface': ifname, 'ip': ip})
+        except Exception:
+            pass
+        if results:
+            return results
+
+    # Windows: parse ipconfig
+    if IS_WIN:
+        try:
+            import locale
+            encs = [locale.getpreferredencoding(False), 'cp949', 'utf-8', 'latin1']
+            out = None
+            for enc in encs:
+                try:
+                    out = subprocess.check_output(
+                        ['ipconfig', '/all'], text=True, encoding=enc, errors='ignore',
+                    )
+                    break
+                except Exception:
+                    continue
+            if out:
+                current_adapter = ''
+                for line in out.splitlines():
+                    stripped = line.strip()
+                    # Adapter header lines are not indented
+                    if line and not line[0].isspace() and ':' in line:
+                        current_adapter = line.split(':')[0].strip()
+                        # Remove "Ethernet adapter" / "Wireless LAN adapter" prefix
+                        for pfx in ('Ethernet adapter', 'Wireless LAN adapter',
+                                    'Ethernet-Adapter', 'Drahtlos-LAN-Adapter'):
+                            if current_adapter.startswith(pfx):
+                                current_adapter = current_adapter[len(pfx):].strip()
+                    if ('IPv4 Address' in stripped or 'IPv4-Adresse' in stripped
+                            or 'IPv4 주소' in stripped):
+                        ip = stripped.split(':')[-1].strip().rstrip('(Preferred)').rstrip('(Bevorzugt)').strip()
+                        if exclude_loopback and ip.startswith('127.'):
+                            continue
+                        if re.match(r'^\d+\.\d+\.\d+\.\d+$', ip):
+                            results.append({'iface': current_adapter or ip, 'ip': ip})
+        except Exception:
+            pass
+        if results:
+            return results
+
+    # Fallback: IP-only
+    for ip in list_local_ipv4(exclude_loopback):
+        results.append({'iface': ip, 'ip': ip})
+    return results
+
 def is_ipv4(s: str) -> bool:
     """Check if string is a valid IPv4 address."""
     parts = s.split('.')

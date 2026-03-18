@@ -1,364 +1,301 @@
-import { useState, useEffect, useCallback } from 'react'
-import { api } from '../api'
-import type { Agent, TestState, TestConfig as TConfig, Profile, LogEntry, ClientRow } from '../types'
+﻿import { useState, useEffect, useCallback, useRef } from 'react'
+import type { Agent, TestConfig, TestState, ClientRow, Metrics } from '../types'
+import TopologyDiagram from './TopologyDiagram'
 
-interface Props {
-  agents: Agent[]
-  profiles: Profile[]
-  testState: TestState
-  onProfilesChange: (p: Profile[]) => void
-  onLog: (msg: string, type?: LogEntry['type']) => void
-}
+const MODES = ['bidirectional', 'upload', 'download'] as const
+const PROTOCOLS = ['tcp', 'udp'] as const
 
-const defaults: Omit<TConfig, 'server_agent' | 'server_bind' | 'api_key' | 'clients'> = {
-  duration_sec: 30,
+const DEFAULT_CONFIG: TestConfig = {
+  server_agent: '',
+  server_bind: '',
+  api_key: '',
+  duration_sec: 10,
   base_port: 5201,
   poll_interval_sec: 1,
   protocol: 'tcp',
-  parallel: 4,
-  omit_sec: 1,
+  parallel: 1,
+  omit_sec: 0,
   bitrate: '',
   tcp_window: '',
-  mode: 'download',
+  mode: 'bidirectional',
+  clients: [],
 }
 
-export function TestConfig({ agents, profiles, testState, onProfilesChange, onLog }: Props) {
-  const [cfg, setCfg] = useState<TConfig>({
-    ...defaults,
-    server_agent: '',
-    server_bind: '',
-    api_key: '',
-    clients: [],
-  })
-  const [profileName, setProfileName] = useState('')
+interface TestConfigProps {
+  agents: Record<string, Agent>
+  testState: TestState
+  latestMetrics?: Metrics | null
+  onStart: (config: TestConfig) => Promise<void>
+  onStop: () => Promise<void>
+  onConfigChange?: (config: TestConfig) => void
+}
 
-  const onlineAgents = agents.filter(a => a.status === 'online')
-  const running = testState.status !== 'idle'
+export default function TestConfigPanel({
+  agents, testState, latestMetrics, onStart, onStop, onConfigChange,
+}: TestConfigProps) {
+  const [open, setOpen] = useState(true)
+  const [showParams, setShowParams] = useState(false)
+  const [config, setConfig] = useState<TestConfig>(DEFAULT_CONFIG)
 
-  // Auto-select first server agent
+  const isRunning = testState.status !== 'idle'
+
+  // Keep parent in sync
+  const onConfigChangeRef = useRef(onConfigChange)
+  onConfigChangeRef.current = onConfigChange
+  useEffect(() => { onConfigChangeRef.current?.(config) }, [config])
+
+  // Receive loaded profiles
   useEffect(() => {
-    if (!cfg.server_agent && onlineAgents.length > 0) {
-      setCfg(c => ({ ...c, server_agent: onlineAgents[0].url }))
+    const handler = (e: Event) => {
+      const ce = e as CustomEvent<TestConfig>
+      if (ce.detail && typeof ce.detail === 'object') setConfig(ce.detail)
     }
-  }, [onlineAgents, cfg.server_agent])
+    window.addEventListener('load-profile', handler)
+    return () => window.removeEventListener('load-profile', handler)
+  }, [])
 
-  const update = <K extends keyof TConfig>(key: K, val: TConfig[K]) =>
-    setCfg(c => ({ ...c, [key]: val }))
+  const update = useCallback(<K extends keyof TestConfig>(key: K, value: TestConfig[K]) => {
+    setConfig(prev => ({ ...prev, [key]: value }))
+  }, [])
 
-  const addClient = useCallback(() => {
-    const available = onlineAgents.filter(
-      a => a.url !== cfg.server_agent && !cfg.clients.some(c => c.agent === a.url)
-    )
-    if (available.length === 0) return
-    const a = available[0]
-    const row: ClientRow = { agent: a.url, name: a.name, server_target: '', api_key: '' }
-    setCfg(c => ({ ...c, clients: [...c.clients, row] }))
-  }, [onlineAgents, cfg.server_agent, cfg.clients])
+  const removeRow = (idx: number) => {
+    setConfig(prev => ({ ...prev, clients: prev.clients.filter((_, i) => i !== idx) }))
+  }
 
-  const removeClient = (idx: number) =>
-    setCfg(c => ({ ...c, clients: c.clients.filter((_, i) => i !== idx) }))
-
-  const updateClient = (idx: number, key: keyof ClientRow, val: string) =>
-    setCfg(c => ({
-      ...c,
-      clients: c.clients.map((r, i) => i === idx ? { ...r, [key]: val } : r),
+  const updateRow = (idx: number, key: keyof ClientRow, value: string) => {
+    setConfig(prev => ({
+      ...prev,
+      clients: prev.clients.map((r, i) => i === idx ? { ...r, [key]: value } : r),
     }))
-
-  const startTest = async () => {
-    if (running) return
-    if (!cfg.server_agent) {
-      onLog('Select a server agent', 'err')
-      return
-    }
-    if (cfg.clients.length === 0) {
-      onLog('Add at least one client', 'err')
-      return
-    }
-    onLog('Starting test…')
-    await api('/api/test/start', { method: 'POST', body: JSON.stringify(cfg) })
   }
 
-  const stopTest = async () => {
-    onLog('Stopping test…')
-    await api('/api/test/stop', { method: 'POST' })
-  }
+  // CSS helpers
+  const SL = 'text-[11px] font-semibold uppercase tracking-widest text-fg-3 mb-2'
+  const FL = 'block text-[12px] font-medium text-fg-2 mb-1'
 
-  const saveProfile = async () => {
-    if (!profileName.trim()) return
-    const r = await api<{ ok: boolean; name: string }>('/api/profiles', {
-      method: 'POST',
-      body: JSON.stringify({ name: profileName.trim(), config: cfg }),
-    })
-    if (r) {
-      onLog(`Profile saved: ${r.name}`, 'ok')
-      const list = await api<Profile[]>('/api/profiles')
-      if (list) onProfilesChange(list)
-    }
-  }
+  // Mode / protocol toggle classes
+  const toggleBtn = (active: boolean) =>
+    `inline-flex items-center px-3 h-8 text-[13px] font-medium border-r border-line last:border-r-0 transition-colors duration-150 leading-none ` +
+    (active
+      ? 'bg-accent text-white'
+      : 'text-fg-3 hover:text-fg hover:bg-surface-hover disabled:opacity-40 disabled:cursor-not-allowed')
 
-  const loadProfile = async (name: string) => {
-    const r = await api<{ name: string; config: TConfig }>(`/api/profiles/${name}`)
-    if (r) {
-      setCfg(r.config)
-      setProfileName(name)
-      onLog(`Loaded profile: ${name}`, 'ok')
-    }
-  }
+  const statusLabel =
+    testState.status === 'running' ? 'Running…' :
+    testState.status === 'stopping' ? 'Stopping…' : ''
 
   return (
     <div className="panel">
-      <div className="px-4 py-3 border-b border-line flex items-center justify-between">
-        <h3 className="text-sm font-semibold">Test Configuration</h3>
-        <div className="flex gap-2">
-          {!running ? (
-            <button
-              onClick={startTest}
-              disabled={!cfg.server_agent || cfg.clients.length === 0}
-              className="btn btn-primary btn-sm"
-            >
-              ▶ Start Test
-            </button>
-          ) : (
-            <button onClick={stopTest} className="btn btn-danger btn-sm">
-              ■ Stop
-            </button>
-          )}
+      {/* ── Header ──────────────────────────────────────────── */}
+      <div
+        className="flex items-center justify-between px-4 py-3 border-b border-line cursor-pointer select-none hover:bg-surface-hover transition-colors duration-150"
+        onClick={() => setOpen(o => !o)}
+      >
+        <div className="flex items-center gap-3">
+          <span className="text-[13px] font-semibold text-fg">Test Configuration</span>
+          {statusLabel && <span className="text-[12px] text-fg-3">{statusLabel}</span>}
         </div>
+        <span className={`text-fg-3 text-lg leading-none transition-transform duration-150 ${open ? '' : '-rotate-90'}`}>
+          ▾
+        </span>
       </div>
 
-      <div className="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-        {/* Server Agent */}
-        <div>
-          <label className="block text-[11px] font-medium text-fg-3 uppercase tracking-wider mb-1.5">
-            Server Agent
-          </label>
-          <select
-            value={cfg.server_agent}
-            onChange={e => update('server_agent', e.target.value)}
-            disabled={running}
-            className="input-base"
-          >
-            <option value="">— select —</option>
-            {onlineAgents.map(a => (
-              <option key={a.id} value={a.url}>{a.name}</option>
-            ))}
-          </select>
-        </div>
+      {/* ── Body ────────────────────────────────────────────── */}
+      <div className={`collapsible-grid ${open ? 'open' : 'closed'}`}>
+        <div className="collapsible-inner">
+          <div className="p-4 flex flex-col gap-0">
 
-        {/* Protocol */}
-        <div>
-          <label className="block text-[11px] font-medium text-fg-3 uppercase tracking-wider mb-1.5">
-            Protocol
-          </label>
-          <select
-            value={cfg.protocol}
-            onChange={e => update('protocol', e.target.value as 'tcp' | 'udp')}
-            disabled={running}
-            className="input-base"
-          >
-            <option value="tcp">TCP</option>
-            <option value="udp">UDP</option>
-          </select>
-        </div>
-
-        {/* Mode */}
-        <div>
-          <label className="block text-[11px] font-medium text-fg-3 uppercase tracking-wider mb-1.5">
-            Mode
-          </label>
-          <select
-            value={cfg.mode}
-            onChange={e => update('mode', e.target.value)}
-            disabled={running}
-            className="input-base"
-          >
-            <option value="download">Download</option>
-            <option value="upload">Upload</option>
-            <option value="bidirectional">Bidirectional</option>
-          </select>
-        </div>
-
-        {/* Duration */}
-        <div>
-          <label className="block text-[11px] font-medium text-fg-3 uppercase tracking-wider mb-1.5">
-            Duration (sec)
-          </label>
-          <input
-            type="number"
-            value={cfg.duration_sec}
-            onChange={e => update('duration_sec', +e.target.value || 30)}
-            disabled={running}
-            className="input-base"
-            min={1}
-            max={3600}
+          {/* Topology Diagram */}
+          <TopologyDiagram
+            agents={agents}
+            config={config}
+            isRunning={isRunning}
+            latestMetrics={latestMetrics}
+            onUpdate={update}
+            onUpdateRow={updateRow}
+            onAddClient={(agentId: string) => {
+              setConfig(prev => {
+                // Prevent duplicates: skip if agent is already a client or is the server
+                if (prev.server_agent === agentId) return prev
+                if (prev.clients.some(c => c.agent === agentId)) return prev
+                return {
+                  ...prev,
+                  clients: [...prev.clients, { agent: agentId, name: '', server_target: '', bind: '', api_key: '' }],
+                }
+              })
+            }}
+            onRemoveClient={removeRow}
+            onSetServer={(agentId: string) => {
+              setConfig(prev => {
+                // Remove from clients if being promoted to server
+                const clients = prev.clients.filter(c => c.agent !== agentId)
+                return { ...prev, server_agent: agentId, clients }
+              })
+            }}
+            onRemoveServer={() => { update('server_agent', ''); update('server_bind', '') }}
           />
-        </div>
 
-        {/* Parallel */}
-        <div>
-          <label className="block text-[11px] font-medium text-fg-3 uppercase tracking-wider mb-1.5">
-            Parallel Streams
-          </label>
-          <input
-            type="number"
-            value={cfg.parallel}
-            onChange={e => update('parallel', +e.target.value || 1)}
-            disabled={running}
-            className="input-base"
-            min={1}
-            max={128}
-          />
-        </div>
+          <hr className="my-4 border-line" />
 
-        {/* Base Port */}
-        <div>
-          <label className="block text-[11px] font-medium text-fg-3 uppercase tracking-wider mb-1.5">
-            Base Port
-          </label>
-          <input
-            type="number"
-            value={cfg.base_port}
-            onChange={e => update('base_port', +e.target.value || 5201)}
-            disabled={running}
-            className="input-base"
-          />
-        </div>
-
-        {/* Bitrate */}
-        <div>
-          <label className="block text-[11px] font-medium text-fg-3 uppercase tracking-wider mb-1.5">
-            Bitrate (e.g. 1G)
-          </label>
-          <input
-            value={cfg.bitrate}
-            onChange={e => update('bitrate', e.target.value)}
-            disabled={running}
-            className="input-base"
-            placeholder="auto"
-          />
-        </div>
-
-        {/* Omit */}
-        <div>
-          <label className="block text-[11px] font-medium text-fg-3 uppercase tracking-wider mb-1.5">
-            Omit (sec)
-          </label>
-          <input
-            type="number"
-            value={cfg.omit_sec}
-            onChange={e => update('omit_sec', +e.target.value)}
-            disabled={running}
-            className="input-base"
-            min={0}
-          />
-        </div>
-      </div>
-
-      {/* Clients */}
-      <div className="px-4 pb-4">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-[11px] font-medium text-fg-3 uppercase tracking-wider">
-            Client Agents ({cfg.clients.length})
-          </span>
+          {/* Parameters + Advanced + Protocol — collapsible */}
           <button
-            onClick={addClient}
-            disabled={running}
-            className="btn btn-sm"
-          >+ Add Client</button>
-        </div>
+            type="button"
+            className="flex items-center gap-2 w-full text-left mb-2"
+            onClick={() => setShowParams(p => !p)}
+          >
+            <span className={`text-fg-3 text-xs leading-none transition-transform duration-150 ${showParams ? '' : '-rotate-90'}`}>▾</span>
+            <span className={SL + ' mb-0'}>Parameters &amp; Options</span>
+          </button>
 
-        {cfg.clients.length > 0 && (
-          <div className="border border-line rounded-sm overflow-hidden">
-            <table className="w-full text-[13px]">
-              <thead>
-                <tr className="bg-surface-raised text-fg-3">
-                  <th className="text-left px-3 py-2 font-medium">Agent</th>
-                  <th className="text-left px-3 py-2 font-medium">Name</th>
-                  <th className="text-left px-3 py-2 font-medium">Server Target</th>
-                  <th className="w-10" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line">
-                {cfg.clients.map((c, i) => (
-                  <tr key={i} className="hover:bg-surface-hover transition-colors">
-                    <td className="px-3 py-1.5">
-                      <select
-                        value={c.agent}
-                        onChange={e => updateClient(i, 'agent', e.target.value)}
-                        disabled={running}
-                        className="input-base"
-                      >
-                        {onlineAgents
-                          .filter(a => a.url !== cfg.server_agent)
-                          .map(a => (
-                            <option key={a.id} value={a.url}>{a.name}</option>
-                          ))}
-                      </select>
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <input
-                        value={c.name}
-                        onChange={e => updateClient(i, 'name', e.target.value)}
-                        disabled={running}
-                        className="input-base"
-                      />
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <input
-                        value={c.server_target}
-                        onChange={e => updateClient(i, 'server_target', e.target.value)}
-                        disabled={running}
-                        className="input-base"
-                        placeholder="auto"
-                      />
-                    </td>
-                    <td className="px-2 text-center">
-                      <button
-                        onClick={() => removeClient(i)}
-                        disabled={running}
-                        className="text-fg-3 hover:text-err text-xs"
-                        aria-label="Remove client"
-                      >✕</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Profiles */}
-      <div className="px-4 pb-4 border-t border-line pt-3">
-        <div className="flex gap-2 items-end">
-          <div className="flex-1">
-            <label className="block text-[11px] font-medium text-fg-3 uppercase tracking-wider mb-1.5">
-              Profile
-            </label>
-            <div className="flex gap-2">
-              <select
-                className="input-base flex-1"
-                value=""
-                onChange={e => e.target.value && loadProfile(e.target.value)}
-              >
-                <option value="">Load profile…</option>
-                {profiles.map(p => (
-                  <option key={p.name} value={p.name}>{p.name}</option>
-                ))}
-              </select>
+          <div className={`overflow-hidden transition-all duration-200 ${showParams ? 'max-h-[600px] opacity-100' : 'max-h-0 opacity-0'}`}>
+          <div className={SL}>Parameters</div>
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
+            <div>
+              <label className={FL}>Duration (s)</label>
               <input
-                className="input-base w-40"
-                placeholder="New profile name"
-                value={profileName}
-                onChange={e => setProfileName(e.target.value)}
+                type="number" min={1}
+                className="input-base"
+                value={config.duration_sec}
+                onChange={e => update('duration_sec', Math.max(1, parseInt(e.target.value) || 1))}
+                disabled={isRunning}
               />
-              <button onClick={saveProfile} className="btn btn-sm" disabled={!profileName.trim()}>
-                Save
-              </button>
             </div>
+            <div>
+              <label className={FL}>Base Port</label>
+              <input
+                type="number" min={1024} max={65534}
+                className="input-base"
+                value={config.base_port}
+                onChange={e => update('base_port', parseInt(e.target.value) || 5201)}
+                disabled={isRunning}
+              />
+            </div>
+            <div>
+              <label className={FL}>Poll Interval (s)</label>
+              <input
+                type="number" min={0.1} step={0.1}
+                className="input-base"
+                value={config.poll_interval_sec}
+                onChange={e => update('poll_interval_sec', parseFloat(e.target.value) || 1)}
+                disabled={isRunning}
+              />
+            </div>
+            <div>
+              <label className={FL}>Parallel Streams</label>
+              <input
+                type="number" min={1} max={128}
+                className="input-base"
+                value={config.parallel}
+                onChange={e => update('parallel', Math.max(1, parseInt(e.target.value) || 1))}
+                disabled={isRunning}
+              />
+            </div>
+            <div>
+              <label className={FL}>Omit (s)</label>
+              <input
+                type="number" min={0}
+                className="input-base"
+                value={config.omit_sec}
+                onChange={e => update('omit_sec', Math.max(0, parseInt(e.target.value) || 0))}
+                disabled={isRunning}
+              />
+            </div>
+          </div>
+
+          <hr className="my-4 border-line" />
+
+          {/* Advanced */}
+          <div className={SL}>Advanced</div>
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
+            <div>
+              <label className={FL}>Bitrate</label>
+              <input
+                className="input-base"
+                placeholder="e.g. 100M or 0"
+                value={config.bitrate}
+                onChange={e => update('bitrate', e.target.value)}
+                disabled={isRunning}
+              />
+            </div>
+            <div>
+              <label className={FL}>TCP Window</label>
+              <input
+                className="input-base"
+                placeholder="e.g. 128K"
+                value={config.tcp_window}
+                onChange={e => update('tcp_window', e.target.value)}
+                disabled={isRunning}
+              />
+            </div>
+          </div>
+
+          <hr className="my-4 border-line" />
+
+          {/* Protocol + Mode toggles */}
+          <div className="flex gap-8 flex-wrap">
+            <div>
+              <div className={SL}>Protocol</div>
+              <div className="inline-flex border border-line rounded-sm overflow-hidden bg-bg">
+                {PROTOCOLS.map(p => (
+                  <button
+                    key={p}
+                    type="button"
+                    disabled={isRunning}
+                    onClick={() => update('protocol', p)}
+                    className={toggleBtn(config.protocol === p)}
+                  >
+                    {p.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className={SL}>Mode</div>
+              <div className="inline-flex border border-line rounded-sm overflow-hidden bg-bg">
+                {MODES.map(m => (
+                  <button
+                    key={m}
+                    type="button"
+                    disabled={isRunning}
+                    onClick={() => update('mode', m)}
+                    className={toggleBtn(config.mode === m)}
+                  >
+                    {m.charAt(0).toUpperCase() + m.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          </div>{/* end collapsible */}
+
+          <hr className="my-4 border-line" />
+
+          {/* Actions */}
+          <div className="flex items-center gap-2">
+            <button
+              className="btn btn-primary"
+              disabled={isRunning || !config.server_agent}
+              onClick={() => onStart(config)}
+            >
+              {isRunning && (
+                <span className="w-3.5 h-3.5 border-[2px] border-white/30 border-t-white rounded-full animate-spin shrink-0" />
+              )}
+              Start Test
+            </button>
+            <button
+              className="btn btn-danger"
+              disabled={testState.status === 'idle'}
+              onClick={() => onStop()}
+            >
+              Stop
+            </button>
+            {!config.server_agent && !isRunning && (
+              <span className="text-[12px] text-fg-3 ml-1">Select a server agent to start</span>
+            )}
           </div>
         </div>
       </div>
     </div>
+  </div>
   )
 }

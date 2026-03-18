@@ -35,10 +35,13 @@
       bg-surface-raised text-fg cursor-pointer whitespace-nowrap
       transition-all duration-150
       hover:border-line-bright hover:bg-surface-hover
-      active:bg-surface-active
+      active:scale-[0.96] active:bg-surface-active
       disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none;
+    line-height: 1;
+    padding-top: 0;
+    padding-bottom: 2px;
   }
-  .btn-primary { @apply bg-accent border-accent text-white hover:bg-accent-dim hover:border-accent-dim; }
+  .btn-primary { @apply bg-accent border-accent text-white hover:bg-accent-dim hover:border-accent-dim active:bg-accent; }
   .btn-danger { @apply bg-transparent border-err text-err hover:bg-err-subtle; }
   .btn-sm { @apply h-7 px-2.5 text-xs; }
   .panel { @apply bg-surface border border-line rounded overflow-hidden; }
@@ -46,6 +49,47 @@
 
 @layer utilities {
   .tabular { font-variant-numeric: tabular-nums; }
+
+  /* Smooth section collapse/expand via grid-template-rows trick */
+  .collapsible-grid {
+    display: grid;
+    transition: grid-template-rows 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .collapsible-grid.open {
+    grid-template-rows: 1fr;
+  }
+  .collapsible-grid.closed {
+    grid-template-rows: 0fr;
+  }
+  .collapsible-inner {
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  .animate-agent-in {
+    animation: agentIn 200ms ease-out both;
+  }
+  .animate-toast-in {
+    animation: toastIn 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .animate-toast-out {
+    animation: toastOut 180ms ease-in both;
+  }
+}
+
+@keyframes agentIn {
+  from { opacity: 0; transform: translateX(-8px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes toastOut {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to   { opacity: 0; transform: translateY(8px) scale(0.96); }
 }
 
 @media (prefers-reduced-motion: reduce) {

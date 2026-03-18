@@ -1,28 +1,24 @@
-# iperf_manager
+# iperf-manager
 
-A distributed iperf3 network performance testing system with a real-time GUI dashboard. Deploy lightweight agents on test hosts and orchestrate multi-client throughput tests from a central dashboard.
-
-![Dashboard Dark Theme](docs/images/dashboard_dark.png)
+A distributed **iperf3** network performance testing platform with a **web dashboard** and **headless agents**. Deploy lightweight agents on test hosts and orchestrate multi-client throughput tests from any browser.
 
 ## Features
 
-- **Distributed Architecture** -- Deploy agents on multiple hosts; orchestrate tests from one dashboard
-- **Real-Time Monitoring** -- Live throughput charts (total, per-agent, UDP jitter/loss) updated every second
-- **Multi-Client Testing** -- Run simultaneous iperf3 sessions across multiple client/server pairs
-- **Test Modes** -- Bidirectional, upload-only, download-only, dual, two-phase
-- **TCP & UDP** -- Full support for both protocols with per-client configuration
-- **Auto-Discovery** -- Find agents on the local network via UDP broadcast
-- **Profile Management** -- Save, load, and delete test configurations
-- **HTML Reports** -- Generate reports with embedded throughput/jitter/loss charts
-- **CSV Export** -- Wide-format metrics export for further analysis
-- **Dark / Light Theme** -- Dracula color palette with theme toggle (`Ctrl+T`)
-- **Headless Mode** -- Run agents without GUI for server/daemon deployment
-- **CLI Controller** -- Config-driven headless test execution for CI/automation
+- **Distributed Architecture** — Deploy agents on multiple hosts; control everything from one web UI
+- **Real-Time Monitoring** — Live throughput charts (total, per-agent, UDP jitter/loss) via Socket.IO
+- **Multi-Client Testing** — Run simultaneous iperf3 sessions across multiple client/server pairs
+- **Test Modes** — Bidirectional, upload-only, download-only, dual, two-phase
+- **TCP & UDP** — Full support for both protocols with per-client configuration
+- **Auto-Discovery** — Find agents on the local network via UDP broadcast
+- **Profile Management** — Save, load, and delete test configurations
+- **HTML Reports** — Generate reports with embedded throughput/jitter/loss charts
+- **CSV Export** — Wide-format metrics export for further analysis
+- **Headless Agents** — Zero-dependency agents for Linux/Windows server deployment
 
 ## Architecture
 
 ```
-Dashboard / Controller (orchestrator)
+Web Dashboard (Flask + React)
     |  REST API (HTTP)
     +---> Agent A (server-side)          Agent B (client-side)
               | spawns                       | spawns
@@ -33,19 +29,8 @@ Dashboard / Controller (orchestrator)
 
 | Component | Description | Entry Point |
 |-----------|-------------|-------------|
-| **Agent** | REST API service managing iperf3 processes on a host | `main_agent.py` |
-| **Dashboard** | PySide6 GUI for test orchestration and live visualization | `main_dashboard.py` |
-| **Controller** | CLI tool for headless/automated test execution | `controller_v5_18.py` |
-
-## Screenshots
-
-| Dark Theme | Light Theme |
-|:---:|:---:|
-| ![Dark](docs/images/dashboard_dark.png) | ![Light](docs/images/dashboard_light.png) |
-
-**Agent Window:**
-
-![Agent](docs/images/agent_dark.png)
+| **Agent** | Headless REST API service managing iperf3 processes | `main_agent.py` |
+| **Web Dashboard** | Flask + React SPA for test orchestration and live visualization | `main_web.py` |
 
 ## Quick Start
 
@@ -54,63 +39,54 @@ Dashboard / Controller (orchestrator)
 - Python 3.10+
 - [iperf3](https://iperf.fr/iperf-download.php) binary on each agent host
 
-### Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-Dependencies: `PySide6`, `pyqtgraph`, `numpy`, `matplotlib`
-
 ### 1. Start Agents
 
-Run on each test host (server and client machines):
+Install and run on each test host (server and client machines):
 
 ```bash
 python main_agent.py
 ```
 
-Or headless (no GUI):
+The agent starts a REST API on port **9001** (configurable) and listens for UDP discovery on port **9999**. Agents have zero pip dependencies — stdlib only.
+
+### 2. Start Web Dashboard
+
+Install dependencies and start:
 
 ```bash
-python main_agent.py --headless
+pip install -r requirements.txt
+python main_web.py
 ```
 
-The agent starts a REST API on port **9001** (configurable) and listens for UDP discovery on port **9999**.
+Open `http://localhost:5000` in your browser.
 
-### 2. Start Dashboard
-
-Run on any machine that can reach the agents:
+The React frontend is served from `web/frontend/dist/`. To rebuild it:
 
 ```bash
-python main_dashboard.py
+cd web/frontend
+npm install
+npm run build
 ```
 
 ### 3. Configure and Run Tests
 
-1. **Agents & Servers** tab -- Set server agent URL, bind IP, and click **Discover** to find client agents
-2. **Test & Mode** tab -- Choose test mode, duration, protocol, and per-client settings
-3. Click **Start** to begin the test
-4. **View & Report** tab -- Generate HTML reports and export CSV
+1. Add agents (server + clients) in the dashboard sidebar
+2. Configure test mode, duration, protocol, and per-client settings
+3. Click **Start** — watch live throughput charts update in real time
+4. Generate HTML reports or export CSV when done
 
 ## Agent Configuration
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| Bind Host | `0.0.0.0` | Interface to listen on |
-| Port | `9001` | REST API port |
+| `--host` | `0.0.0.0` | Interface to listen on |
+| `--port` | `9001` | REST API port |
 | Advertise MGMT IP | auto-detect | IP shown in discovery responses |
-| iperf3 Path | auto-detect | Path to iperf3 binary (use **Browse** to select) |
+| iperf3 Path | auto-detect | Path to iperf3 binary |
 | Autostart Ports | `5211,5212` | iperf3 server ports to start automatically |
 | API Token | *(empty)* | Optional `X-API-Key` header for authentication |
 
-Agent config is persisted to `%LOCALAPPDATA%\iperf3-agent\config.json`.
-
-## Keyboard Shortcuts
-
-| Shortcut | Scope | Action |
-|----------|-------|--------|
-| `Ctrl+T` | Dashboard / Agent | Toggle dark/light theme |
+Agent config is persisted to `%LOCALAPPDATA%\iperf3-agent\config.json` (Windows) or `~/.config/iperf3-agent/config.json` (Linux).
 
 ## Agent REST API
 
@@ -122,6 +98,8 @@ Agent config is persisted to `%LOCALAPPDATA%\iperf3-agent\config.json`.
 | `/client/stop` | POST | Stop iperf3 clients |
 | `/metrics` | GET | Poll real-time throughput metrics |
 | `/status` | GET | Agent status, log directory, advertise IP |
+
+All endpoints require `X-API-Key` header when an API token is configured.
 
 ## Test Configuration
 
@@ -166,61 +144,36 @@ Test profiles are saved as JSON. Example:
 
 - UDP tests cannot use `--bidir` or parallel > 1 (iperf3 limitation)
 
-## CLI Controller
-
-For headless/automated testing:
-
-```bash
-python controller_v5_18.py --config test_config.json --out results.csv
-```
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--config` | *(required)* | Path to test configuration JSON |
-| `--out` | `controller_result.csv` | CSV output path |
-
 ## Build
 
-Build standalone Windows executables with PyInstaller:
+Build a standalone Windows agent executable with PyInstaller:
 
 ```bash
-# Build both agent and dashboard (onedir + onefile + zip)
 python build.py
+```
 
-# Build agent only
-python build.py agent
+Options:
 
-# Build dashboard only
-python build.py dashboard
-
-# Build onefile only (single .exe)
-python build.py --onefile
-
-# Build onedir only (directory with DLLs)
-python build.py --onedir
-
-# Skip zip compression
-python build.py --no-zip
+```bash
+python build.py --onefile    # single .exe only
+python build.py --onedir     # directory bundle only
+python build.py --no-zip     # skip zip compression
 ```
 
 Output goes to `release/`:
+
 ```
 release/
   iperf3-agent_v6.0.2/        # onedir bundle
   iperf3-agent_v6.0.2.zip     # zipped onedir
   iperf3-agent_v6.0.2.exe     # single exe
-  iperf3-dashboard_v7.0.0/
-  iperf3-dashboard_v7.0.0.zip
-  iperf3-dashboard_v7.0.0.exe
 ```
 
 Build requires: `pip install pyinstaller`
 
-> **Note:** The agent bundle includes `iperf3.exe` and Cygwin DLLs. The dashboard does not include iperf3 (it only sends REST API commands to agents).
+### iperf3 Binary Setup (Windows)
 
-### iperf3 Binary Setup
-
-The `iperf3.exe` and Cygwin DLLs are **not included** in the repository. Place them in the project root before building the agent:
+Place iperf3 and Cygwin DLLs in the project root before building:
 
 ```
 iperf3.exe
@@ -229,19 +182,22 @@ cygz.dll
 cygcrypto-3.dll
 ```
 
-Download from: [iperf.fr](https://iperf.fr/iperf-download.php) (Windows build includes Cygwin DLLs).
+Download from: [iperf.fr](https://iperf.fr/iperf-download.php)
+
+On Linux, install iperf3 from your package manager (`apt install iperf3`).
+
+## Deployment
+
+See [deploy/README-deploy.md](deploy/README-deploy.md) for Linux systemd and Windows service installation scripts.
 
 ## Project Structure
 
 ```
-iperf_manager/
-  main_agent.py            # Agent entry point
-  main_dashboard.py        # Dashboard entry point
-  controller_v5_18.py      # CLI controller
-  build.py                 # Build script
-  requirements.txt
-  agent.spec               # PyInstaller spec (agent)
-  dashboard.spec            # PyInstaller spec (dashboard)
+iperf-manager/
+  main_agent.py            # Headless agent entry point
+  main_web.py              # Web dashboard entry point
+  build.py                 # PyInstaller build script (agent)
+  requirements.txt         # Python dependencies (web dashboard)
   core/
     agent_service.py       # REST API + iperf3 process management
     test_runner.py         # Test orchestration (server/client lifecycle)
@@ -251,21 +207,24 @@ iperf_manager/
     report.py              # HTML report generation with matplotlib charts
     constants.py           # Versions, defaults, column definitions
     helpers.py             # iperf3 path resolution, utilities
-  ui/
-    dashboard_window.py    # Main dashboard window
-    agent_window.py        # Agent GUI window
-    pages/                 # Tab pages (agents, test, view)
-    widgets/               # Live chart, log viewer, table, status indicator
-    models/                # Table data model
-    delegates/             # Cell editors (checkbox, combo, IPv4, spinbox)
-    dialogs/               # Discovery dialog, edit client dialog
-    workers/               # Background threads (poller, test runner, discovery)
-    theme/                 # Dracula dark/light QSS, colors, arrow SVGs
+  web/
+    app.py                 # Flask + Socket.IO backend
+    frontend/              # React + TypeScript + Tailwind SPA
+      src/
+        App.tsx            # Main application component
+        components/        # Header, Sidebar, LiveResults, TestConfig, etc.
+        hooks/             # useSocket hook for real-time updates
   data/
-    last_profile.json      # Auto-saved last test configuration
-    profiles/              # Named profiles
+    profiles/              # Saved test profiles (JSON)
+  deploy/
+    install-agent-linux.sh # Linux systemd service installer
+    Install-Agent.ps1      # Windows service installer
 ```
 
 ## License
 
 [MIT](LICENSE)
+
+---
+
+> *This project originated as a fork of [iperf_manager](https://github.com/chaeynz/iperf_manager) and has since been extensively rewritten.*

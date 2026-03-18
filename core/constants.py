@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-core.constants - Shared constants for iperf_manager.
+core.constants - Shared constants for iperf-manager.
 
 All version strings, network defaults, UI column definitions,
 color palettes, and preset values live here. No UI imports.
