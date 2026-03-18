@@ -1,1026 +1,1217 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>iperf-manager · Network Performance</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css">
-    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-    <script src="https://unpkg.com/lucide@0.344.0/dist/umd/lucide.min.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>iperf-manager · Network Performance</title>
+  <meta name="description" content="Self-hosted iperf3 network performance test orchestrator">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.344.0/dist/umd/lucide.min.js" defer></script>
 </head>
 <body>
 
-<!-- ═══ Toast Container ═══════════════════════════════════════════════ -->
-<div class="toast-container" id="toastContainer"></div>
+<!-- Skip link for keyboard users -->
+<a class="skip-link" href="#main-content">Skip to main content</a>
 
-<!-- ═══ Header ═════════════════════════════════════════════════════════ -->
-<header class="header">
-    <div class="header__left">
-        <div class="header__brand">
-            <div class="brand-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-            </div>
-            <span>iperf-manager</span>
-            <span class="version-badge">v{{ version }}</span>
-        </div>
+<!-- Live region for screen readers — toast announcements -->
+<div id="toastContainer" class="toast-container" role="status" aria-live="polite" aria-atomic="false"></div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     HEADER (banner landmark)
+     ═══════════════════════════════════════════════════════════════════ -->
+<header class="header" role="banner">
+  <div class="header__left">
+    <div class="header__brand">
+      <div class="brand-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+      </div>
+      <h1 style="font-size:inherit;font-weight:inherit;margin:0">iperf-manager</h1>
+      <span class="version-badge">v{{ version }}</span>
     </div>
-    <div class="header__center">
-        <div class="profile-row">
-            <select id="profileSelect" style="width:160px">
-                <option value="">Select profile…</option>
-            </select>
-            <button class="btn-icon" onclick="loadSelectedProfile()" title="Load profile"><i data-lucide="download"></i></button>
-            <button class="btn-icon" onclick="promptSaveProfile()" title="Save profile"><i data-lucide="save"></i></button>
-            <button class="btn-icon" onclick="deleteSelectedProfile()" title="Delete profile"><i data-lucide="trash-2"></i></button>
-        </div>
+  </div>
+  <nav class="header__center" aria-label="Profile controls">
+    <div class="profile-row">
+      <label for="profileSelect" class="sr-only">Select profile</label>
+      <select id="profileSelect" style="width:160px">
+        <option value="">Select profile…</option>
+      </select>
+      <button class="btn-icon" id="btnLoadProfile" aria-label="Load selected profile"><i data-lucide="download"></i></button>
+      <button class="btn-icon" id="btnSaveProfile" aria-label="Save current config as profile"><i data-lucide="save"></i></button>
+      <button class="btn-icon" id="btnDeleteProfile" aria-label="Delete selected profile"><i data-lucide="trash-2"></i></button>
     </div>
-    <div class="header__right">
-        <div class="ws-status" id="wsStatus">
-            <div class="ws-dot" id="wsDot"></div>
-            <span id="wsLabel">Connecting…</span>
-        </div>
+  </nav>
+  <div class="header__right">
+    <div class="ws-status" role="status" aria-live="polite">
+      <div class="ws-dot" id="wsDot" aria-hidden="true"></div>
+      <span id="wsLabel">Connecting…</span>
     </div>
+  </div>
 </header>
 
-<!-- ═══ App Layout ════════════════════════════════════════════════════ -->
+<!-- ═══════════════════════════════════════════════════════════════════
+     APP LAYOUT
+     ═══════════════════════════════════════════════════════════════════ -->
 <div class="app-layout">
 
-    <!-- ─── Sidebar ──────────────────────────────────────────────── -->
-    <aside class="sidebar">
-        <!-- Agents -->
-        <div class="sidebar-section">
-            <div class="section-header">
-                <div class="section-title"><i data-lucide="server"></i> Agents</div>
-                <div class="section-actions">
-                    <button class="btn-icon" onclick="discoverAgents()" title="Auto-discover agents"><i data-lucide="radar"></i></button>
-                    <button class="btn-icon" onclick="showAddAgentModal()" title="Add agent manually"><i data-lucide="plus"></i></button>
-                </div>
-            </div>
-            <ul class="agent-list" id="agentList">
-                <li class="empty-state" id="agentEmpty">
-                    <i data-lucide="wifi-off"></i>
-                    <p>No agents connected</p>
-                    <span>Click Discover or + to get started</span>
-                </li>
-            </ul>
+<!-- ─── SIDEBAR (complementary landmark) ──────────────────────────── -->
+<aside class="sidebar" aria-label="Agents, reports & info">
+
+  <!-- Agents section -->
+  <div class="sidebar-section">
+    <div class="section-header">
+      <h2 class="section-title"><i data-lucide="server" aria-hidden="true"></i> Agents</h2>
+      <div class="section-actions">
+        <button class="btn-text" id="btnDiscover" aria-label="Discover agents on network">
+          <i data-lucide="radar" aria-hidden="true"></i> Discover
+        </button>
+        <button class="btn-text" id="btnAddAgent" aria-label="Add agent manually">
+          <i data-lucide="plus" aria-hidden="true"></i> Add
+        </button>
+      </div>
+    </div>
+    <ul class="agent-list" id="agentList" aria-label="Registered agents">
+      <li class="empty-state" id="agentEmptyState">
+        <i data-lucide="radio" aria-hidden="true"></i>
+        <p>No agents registered</p>
+        <span>Click Discover or Add to connect</span>
+      </li>
+    </ul>
+  </div>
+
+  <!-- Reports section -->
+  <div class="sidebar-section">
+    <div class="section-header">
+      <h2 class="section-title"><i data-lucide="file-text" aria-hidden="true"></i> Reports</h2>
+      <div class="section-actions">
+        <button class="btn-text" id="btnRefreshReports" aria-label="Refresh reports list">
+          <i data-lucide="refresh-cw" aria-hidden="true"></i>
+        </button>
+      </div>
+    </div>
+    <ul class="report-list" id="reportList" aria-label="Test reports">
+      <li class="empty-state-sm">No reports yet</li>
+    </ul>
+  </div>
+
+  <!-- Info section -->
+  <div class="sidebar-section">
+    <div class="section-header">
+      <h2 class="section-title"><i data-lucide="info" aria-hidden="true"></i> System</h2>
+    </div>
+    <div style="font-size:var(--text-xs); color:var(--text-secondary); line-height:1.7">
+      <div>Dashboard <span class="agent-tag">v{{ version }}</span></div>
+      <div>Modes: <span class="agent-tag">bidir</span> <span class="agent-tag">up</span> <span class="agent-tag">down</span> <span class="agent-tag">dual</span></div>
+      <div>Protocols: <span class="agent-tag">TCP</span> <span class="agent-tag">UDP</span></div>
+    </div>
+  </div>
+
+</aside>
+
+<!-- ─── MAIN CONTENT ──────────────────────────────────────────────── -->
+<main class="main-content" id="main-content" aria-label="Dashboard">
+
+  <!-- Overview stats -->
+  <section class="stats-overview" aria-label="Agent overview">
+    <div class="stat-card">
+      <div class="stat-card__icon green"><i data-lucide="wifi" aria-hidden="true"></i></div>
+      <div><div class="stat-card__value" id="statOnline">0</div><div class="stat-card__label">Online</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card__icon"><i data-lucide="server" aria-hidden="true"></i></div>
+      <div><div class="stat-card__value" id="statTotal">0</div><div class="stat-card__label">Agents</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card__icon purple"><i data-lucide="activity" aria-hidden="true"></i></div>
+      <div><div class="stat-card__value" id="statStatus">Idle</div><div class="stat-card__label">Test Status</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card__icon amber"><i data-lucide="file-text" aria-hidden="true"></i></div>
+      <div><div class="stat-card__value" id="statReports">0</div><div class="stat-card__label">Reports</div></div>
+    </div>
+  </section>
+
+  <!-- Test Configuration -->
+  <section class="card">
+    <div class="card-header" role="button" tabindex="0"
+         aria-expanded="true" aria-controls="testConfigBody"
+         id="testConfigToggle">
+      <h2 class="card-title"><i data-lucide="settings" aria-hidden="true"></i> Test Configuration</h2>
+      <div class="card-header__right">
+        <span class="status-pill status-pill--idle" id="testStatusPill">Idle</span>
+        <svg class="collapse-icon" aria-hidden="true" aria-expanded="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+      </div>
+    </div>
+    <div class="card-body" id="testConfigBody">
+
+      <!-- Server & Auth -->
+      <div class="form-section">
+        <div class="form-section-title"><i data-lucide="shield" aria-hidden="true"></i> Server &amp; Authentication</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="serverAgent">Server Agent</label>
+            <select id="serverAgent"><option value="">Select agent…</option></select>
+          </div>
+          <div class="form-group">
+            <label for="serverBind">Server Bind</label>
+            <input type="text" id="serverBind" placeholder="0.0.0.0">
+          </div>
+          <div class="form-group">
+            <label for="apiKey">API Key</label>
+            <input type="password" id="apiKey" placeholder="Optional" autocomplete="off">
+          </div>
         </div>
+      </div>
 
-        <!-- Reports -->
-        <div class="sidebar-section">
-            <div class="section-header">
-                <div class="section-title"><i data-lucide="file-text"></i> Reports</div>
-                <button class="btn-icon" onclick="refreshReports()" title="Refresh reports"><i data-lucide="refresh-cw"></i></button>
-            </div>
-            <ul class="report-list" id="reportsList">
-                <li class="empty-state-sm">No reports yet</li>
-            </ul>
+      <!-- Test Parameters -->
+      <div class="form-section">
+        <div class="form-section-title"><i data-lucide="sliders" aria-hidden="true"></i> Parameters</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="duration">Duration (s)</label>
+            <input type="number" id="duration" value="10" min="1" max="3600">
+          </div>
+          <div class="form-group">
+            <label for="basePort">Base Port</label>
+            <input type="number" id="basePort" value="5201" min="1024" max="65535">
+          </div>
+          <div class="form-group">
+            <label for="pollInterval">Poll Interval (s)</label>
+            <input type="number" id="pollInterval" value="1" min="0.5" max="10" step="0.5">
+          </div>
+          <div class="form-group">
+            <label for="proto">Protocol</label>
+            <select id="proto">
+              <option value="tcp" selected>TCP</option>
+              <option value="udp">UDP</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="parallel">Parallel Streams</label>
+            <input type="number" id="parallel" value="1" min="1" max="128">
+          </div>
+          <div class="form-group">
+            <label for="omit">Omit (s)</label>
+            <input type="number" id="omit" value="1" min="0" max="10">
+          </div>
         </div>
-    </aside>
+      </div>
 
-    <!-- ─── Main Content ─────────────────────────────────────────── -->
-    <main class="main-content">
-
-        <!-- Overview Stats -->
-        <div class="stats-overview">
-            <div class="stat-card">
-                <div class="stat-card__icon blue"><i data-lucide="server"></i></div>
-                <div class="stat-card__content">
-                    <div class="stat-card__value" id="totalAgents">0</div>
-                    <div class="stat-card__label">Total Agents</div>
-                </div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-card__icon green"><i data-lucide="check-circle"></i></div>
-                <div class="stat-card__content">
-                    <div class="stat-card__value" id="onlineAgents">0</div>
-                    <div class="stat-card__label">Online</div>
-                </div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-card__icon purple"><i data-lucide="activity"></i></div>
-                <div class="stat-card__content">
-                    <div class="stat-card__value" id="testCount">0</div>
-                    <div class="stat-card__label">Tests Run</div>
-                </div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-card__icon amber"><i data-lucide="gauge"></i></div>
-                <div class="stat-card__content">
-                    <div class="stat-card__value" id="testStatusCard">Idle</div>
-                    <div class="stat-card__label">Status</div>
-                </div>
-            </div>
+      <!-- Advanced -->
+      <div class="form-section">
+        <div class="form-section-title"><i data-lucide="cpu" aria-hidden="true"></i> Advanced</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="bitrate">Bitrate</label>
+            <input type="text" id="bitrate" placeholder="0 (unlimited)">
+          </div>
+          <div class="form-group">
+            <label for="tcpWindow">TCP Window</label>
+            <input type="text" id="tcpWindow" placeholder="Auto">
+          </div>
         </div>
+      </div>
 
-        <!-- Test Configuration Card -->
-        <div class="card" id="testConfigCard">
-            <div class="card-header collapsible" onclick="toggleSection('testConfig')">
-                <div class="card-title"><i data-lucide="settings"></i> Test Configuration</div>
-                <div class="card-header__right">
-                    <span class="status-pill status-pill--idle" id="testBadge">● Idle</span>
-                    <i data-lucide="chevron-down" class="collapse-icon" id="testConfigIcon"></i>
-                </div>
-            </div>
-            <div class="card-body" id="testConfigBody">
+      <!-- Test Mode -->
+      <div class="form-section">
+        <div class="form-section-title"><i data-lucide="shuffle" aria-hidden="true"></i> Test Mode</div>
+        <fieldset style="border:none;padding:0;margin:0">
+          <legend class="sr-only">Select test mode</legend>
+          <div class="mode-group">
+            <input type="radio" name="mode" id="mode_bidir" value="bidir" checked>
+            <label for="mode_bidir">Bidirectional</label>
+            <input type="radio" name="mode" id="mode_up_only" value="up_only">
+            <label for="mode_up_only">Upload</label>
+            <input type="radio" name="mode" id="mode_down_only" value="down_only">
+            <label for="mode_down_only">Download</label>
+            <input type="radio" name="mode" id="mode_dual" value="dual">
+            <label for="mode_dual">Dual</label>
+            <input type="radio" name="mode" id="mode_two_phase" value="two_phase">
+            <label for="mode_two_phase">Two-Phase</label>
+          </div>
+        </fieldset>
+      </div>
 
-                <!-- Server Section -->
-                <div class="form-section">
-                    <div class="form-section-title"><i data-lucide="hard-drive"></i> Server</div>
-                    <div class="form-row">
-                        <div class="form-group" style="grid-column: span 2">
-                            <label for="serverAgent">Server Agent</label>
-                            <select id="serverAgent"><option value="">— Select agent —</option></select>
-                        </div>
-                        <div class="form-group">
-                            <label for="serverBind">Bind IP</label>
-                            <input id="serverBind" placeholder="e.g. 192.168.1.100">
-                        </div>
-                        <div class="form-group">
-                            <label for="apiKey">API Key</label>
-                            <input id="apiKey" type="password" placeholder="optional">
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Test Parameters -->
-                <div class="form-section">
-                    <div class="form-section-title"><i data-lucide="sliders-horizontal"></i> Parameters</div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="duration">Duration (s)</label>
-                            <input id="duration" type="number" value="30" min="1">
-                        </div>
-                        <div class="form-group">
-                            <label for="basePort">Base Port</label>
-                            <input id="basePort" type="number" value="5211" min="1024">
-                        </div>
-                        <div class="form-group">
-                            <label for="pollInterval">Poll Interval (s)</label>
-                            <input id="pollInterval" type="number" value="1.0" min="0.2" step="0.1">
-                        </div>
-                        <div class="form-group">
-                            <label for="proto">Protocol</label>
-                            <select id="proto">
-                                <option value="tcp">TCP</option>
-                                <option value="udp">UDP</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="parallel">Parallel (-P)</label>
-                            <input id="parallel" type="number" value="1" min="1">
-                        </div>
-                        <div class="form-group">
-                            <label for="omit">Omit (-O)</label>
-                            <input id="omit" type="number" value="1" min="0">
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Advanced -->
-                <div class="form-section">
-                    <div class="form-section-title"><i data-lucide="wrench"></i> Advanced</div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="bitrate">Bitrate (-b)</label>
-                            <input id="bitrate" placeholder="e.g. 100M">
-                        </div>
-                        <div class="form-group">
-                            <label for="tcpWindow">Window (-w)</label>
-                            <input id="tcpWindow" placeholder="e.g. 128K">
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Test Mode -->
-                <div class="form-section">
-                    <div class="form-section-title"><i data-lucide="shuffle"></i> Test Mode</div>
-                    <div class="mode-group">
-                        <input type="radio" name="mode" id="mode_bidir" value="bidir" checked>
-                        <label for="mode_bidir">Bidir</label>
-                        <input type="radio" name="mode" id="mode_up" value="up_only">
-                        <label for="mode_up">Upload</label>
-                        <input type="radio" name="mode" id="mode_dn" value="down_only">
-                        <label for="mode_dn">Download</label>
-                        <input type="radio" name="mode" id="mode_dual" value="dual">
-                        <label for="mode_dual">Dual</label>
-                        <input type="radio" name="mode" id="mode_2p" value="two_phase">
-                        <label for="mode_2p">Two-Phase</label>
-                    </div>
-                </div>
-
-                <!-- Clients Table -->
-                <div class="form-section">
-                    <div class="flex justify-between items-center mb-1">
-                        <div class="form-section-title" style="margin-bottom:0"><i data-lucide="users"></i> Clients</div>
-                        <button class="btn btn--sm btn--primary" onclick="addClientRow()"><i data-lucide="plus"></i> Add Client</button>
-                    </div>
-                    <div style="overflow-x:auto; margin-top:.5rem">
-                        <table class="data-table" id="clientsTable">
-                            <thead><tr>
-                                <th>Name</th>
-                                <th>Agent</th>
-                                <th>Target IP</th>
-                                <th>Proto</th>
-                                <th>Parallel</th>
-                                <th>Bidir</th>
-                                <th></th>
-                            </tr></thead>
-                            <tbody id="clientsBody"></tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <!-- Start / Stop -->
-                <div class="test-controls">
-                    <button class="btn btn--success" id="btnStart" onclick="startTest()">
-                        <i data-lucide="play"></i> Start Test
-                    </button>
-                    <button class="btn btn--danger hidden" id="btnStop" onclick="stopTest()">
-                        <i data-lucide="square"></i> Stop Test
-                    </button>
-                </div>
-            </div>
+      <!-- Client Agents table -->
+      <div class="form-section">
+        <div class="form-section-title" style="justify-content:space-between">
+          <span style="display:flex;align-items:center;gap:var(--space-1)"><i data-lucide="users" aria-hidden="true"></i> Client Agents</span>
+          <button class="btn btn--sm" id="btnAddClientRow" type="button"><i data-lucide="plus" aria-hidden="true"></i> Add Row</button>
         </div>
-
-        <!-- Live Metrics -->
-        <div class="live-metrics hidden" id="liveMetrics">
-            <div class="metric-card upload">
-                <div class="metric-icon"><i data-lucide="arrow-up"></i></div>
-                <div class="metric-data">
-                    <div class="metric-value" id="statUp">0.0</div>
-                    <div class="metric-unit">Mbps</div>
-                </div>
-            </div>
-            <div class="metric-card download">
-                <div class="metric-icon"><i data-lucide="arrow-down"></i></div>
-                <div class="metric-data">
-                    <div class="metric-value" id="statDn">0.0</div>
-                    <div class="metric-unit">Mbps</div>
-                </div>
-            </div>
-            <div class="metric-card total">
-                <div class="metric-icon"><i data-lucide="bar-chart-3"></i></div>
-                <div class="metric-data">
-                    <div class="metric-value" id="statTotal">0.0</div>
-                    <div class="metric-unit">Mbps</div>
-                </div>
-            </div>
-            <div class="metric-card elapsed">
-                <div class="metric-icon"><i data-lucide="clock"></i></div>
-                <div class="metric-data">
-                    <div class="metric-value" id="statElapsed">0s</div>
-                    <div class="metric-unit">Elapsed</div>
-                </div>
-            </div>
+        <div style="overflow-x:auto">
+          <table class="data-table" id="clientsTable">
+            <thead>
+              <tr>
+                <th style="width:40px"><input type="checkbox" id="selectAllClients" aria-label="Select all clients"></th>
+                <th>Agent</th>
+                <th>Name</th>
+                <th>Server Target</th>
+                <th>API Key</th>
+                <th style="width:50px"></th>
+              </tr>
+            </thead>
+            <tbody id="clientsBody"></tbody>
+          </table>
         </div>
+      </div>
 
-        <!-- Progress Bar -->
-        <div class="progress-wrap hidden" id="progressWrap">
-            <div class="progress-bar">
-                <div class="progress-fill" id="progressFill"></div>
-            </div>
-            <span class="progress-text" id="progressText">0%</span>
+      <!-- Action buttons -->
+      <div style="display:flex;gap:var(--space-2);padding-top:var(--space-3)">
+        <button class="btn btn--success" id="btnStartTest" type="button">
+          <i data-lucide="play" aria-hidden="true"></i> Start Test
+        </button>
+        <button class="btn btn--danger" id="btnStopTest" type="button" disabled>
+          <i data-lucide="square" aria-hidden="true"></i> Stop
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Live Performance (visible during/after test) -->
+  <section class="card" id="liveSection" style="display:none">
+    <div class="card-header">
+      <h2 class="card-title"><i data-lucide="activity" aria-hidden="true"></i> Live Performance</h2>
+    </div>
+    <div class="card-body">
+
+      <!-- Progress -->
+      <div class="progress-wrap" id="progressWrap">
+        <div class="progress-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="Test progress">
+          <div class="progress-fill" id="progressFill"></div>
         </div>
+        <span class="progress-text" id="progressText">0%</span>
+      </div>
 
-        <!-- Charts -->
-        <div class="charts-grid hidden" id="chartsPanel">
-            <div class="card">
-                <div class="card-header">
-                    <div class="card-title"><i data-lucide="trending-up"></i> Total Throughput</div>
-                </div>
-                <div class="card-body chart-body">
-                    <canvas id="chartTotal"></canvas>
-                </div>
-            </div>
-            <div class="card">
-                <div class="card-header">
-                    <div class="card-title"><i data-lucide="git-branch"></i> Per-Client Throughput</div>
-                </div>
-                <div class="card-body chart-body">
-                    <canvas id="chartClients"></canvas>
-                </div>
-            </div>
+      <!-- Live metric cards -->
+      <div class="live-metrics" id="liveMetrics" style="margin-top:var(--space-3)" role="region" aria-live="polite" aria-label="Live throughput metrics">
+        <div class="metric-card upload">
+          <div class="metric-icon"><i data-lucide="arrow-up" aria-hidden="true"></i></div>
+          <div><div class="metric-value" id="metricUp">0.00</div><div class="metric-unit">Mbps Upload</div></div>
         </div>
+        <div class="metric-card download">
+          <div class="metric-icon"><i data-lucide="arrow-down" aria-hidden="true"></i></div>
+          <div><div class="metric-value" id="metricDn">0.00</div><div class="metric-unit">Mbps Download</div></div>
+        </div>
+        <div class="metric-card total">
+          <div class="metric-icon"><i data-lucide="bar-chart-3" aria-hidden="true"></i></div>
+          <div><div class="metric-value" id="metricTotal">0.00</div><div class="metric-unit">Mbps Total</div></div>
+        </div>
+        <div class="metric-card elapsed">
+          <div class="metric-icon"><i data-lucide="clock" aria-hidden="true"></i></div>
+          <div><div class="metric-value" id="metricElapsed">0s</div><div class="metric-unit">Elapsed</div></div>
+        </div>
+      </div>
 
-        <!-- Test Log -->
+      <!-- Charts -->
+      <div class="charts-grid" style="margin-top:var(--space-3)">
         <div class="card">
-            <div class="card-header">
-                <div class="card-title"><i data-lucide="terminal"></i> Test Log</div>
-                <button class="btn-text" onclick="clearLog()"><i data-lucide="trash"></i> Clear</button>
-            </div>
-            <div class="card-body">
-                <div class="log-output" id="logOutput"></div>
-            </div>
+          <div class="card-header"><h3 class="card-title">Throughput</h3></div>
+          <div class="chart-body"><canvas id="chartThroughput" aria-label="Throughput chart" role="img"></canvas></div>
         </div>
-
-    </main>
-</div>
-
-<!-- ═══ Add Agent Modal ═══════════════════════════════════════════════ -->
-<div class="modal-overlay" id="addAgentModal">
-    <div class="modal">
-        <div class="modal-header">
-            <h3>Add Agent</h3>
-            <p>Connect to an iperf-manager agent manually.</p>
+        <div class="card">
+          <div class="card-header"><h3 class="card-title">Per-Agent</h3></div>
+          <div class="chart-body"><canvas id="chartPerAgent" aria-label="Per-agent throughput chart" role="img"></canvas></div>
         </div>
-        <div class="modal-body">
-            <div class="form-group">
-                <label for="agentUrl">Agent URL</label>
-                <input id="agentUrl" placeholder="http://192.168.1.10:9001">
-            </div>
-            <div class="form-group">
-                <label for="agentName">Display Name</label>
-                <input id="agentName" placeholder="e.g. pve01">
-            </div>
-            <div class="form-group">
-                <label for="agentApiKey">API Key (optional)</label>
-                <input id="agentApiKey" type="password" placeholder="">
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn" onclick="hideAddAgentModal()">Cancel</button>
-            <button class="btn btn--primary" onclick="addAgent()"><i data-lucide="plus"></i> Add Agent</button>
-        </div>
+      </div>
     </div>
-</div>
+  </section>
 
-<!-- ═══ Save Profile Modal ════════════════════════════════════════════ -->
-<div class="modal-overlay" id="saveProfileModal">
-    <div class="modal">
-        <div class="modal-header">
-            <h3>Save Profile</h3>
-            <p>Save the current test configuration for later.</p>
-        </div>
-        <div class="modal-body">
-            <div class="form-group">
-                <label for="profileName">Profile Name</label>
-                <input id="profileName" placeholder="my-test-profile">
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn" onclick="hideSaveProfileModal()">Cancel</button>
-            <button class="btn btn--primary" onclick="saveProfile()"><i data-lucide="save"></i> Save</button>
-        </div>
+  <!-- Log -->
+  <section class="card">
+    <div class="card-header" role="button" tabindex="0"
+         aria-expanded="true" aria-controls="logBody"
+         id="logToggle">
+      <h2 class="card-title"><i data-lucide="terminal" aria-hidden="true"></i> Log</h2>
+      <div class="card-header__right">
+        <button class="btn btn--sm" id="btnClearLog" type="button">Clear</button>
+        <svg class="collapse-icon" aria-hidden="true" aria-expanded="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+      </div>
     </div>
+    <div class="card-body" id="logBody">
+      <div class="log-output" id="logOutput" role="log" aria-live="off" aria-label="Test execution log"></div>
+    </div>
+  </section>
+
+</main>
+</div><!-- .app-layout -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     MODALS
+     ═══════════════════════════════════════════════════════════════════ -->
+
+<!-- Add Agent Modal -->
+<div class="modal-overlay" id="addAgentModal" role="dialog" aria-modal="true" aria-labelledby="addAgentTitle">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="addAgentTitle">Add Agent</h2>
+      <p>Connect to an iperf3 agent by URL</p>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label for="agentUrl">Agent URL</label>
+        <input type="url" id="agentUrl" placeholder="http://192.168.0.230:9001" required>
+      </div>
+      <div class="form-group">
+        <label for="agentName">Display Name</label>
+        <input type="text" id="agentName" placeholder="pve01">
+      </div>
+      <div class="form-group">
+        <label for="agentApiKey">API Key</label>
+        <input type="password" id="agentApiKey" placeholder="Optional" autocomplete="off">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" id="btnCancelAgent" type="button">Cancel</button>
+      <button class="btn btn--primary" id="btnConfirmAgent" type="button"><i data-lucide="plus" aria-hidden="true"></i> Add Agent</button>
+    </div>
+  </div>
 </div>
 
-<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- Save Profile Modal -->
+<div class="modal-overlay" id="saveProfileModal" role="dialog" aria-modal="true" aria-labelledby="saveProfileTitle">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="saveProfileTitle">Save Profile</h2>
+      <p>Save current configuration for reuse</p>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label for="profileName">Profile Name</label>
+        <input type="text" id="profileName" placeholder="production-test" required>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" id="btnCancelProfile" type="button">Cancel</button>
+      <button class="btn btn--primary" id="btnConfirmProfile" type="button"><i data-lucide="save" aria-hidden="true"></i> Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Delete Confirm Modal -->
+<div class="modal-overlay" id="deleteConfirmModal" role="dialog" aria-modal="true" aria-labelledby="deleteConfirmTitle">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="deleteConfirmTitle">Confirm Delete</h2>
+      <p id="deleteConfirmMsg">Are you sure?</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" id="btnCancelDelete" type="button">Cancel</button>
+      <button class="btn btn--danger" id="btnConfirmDelete" type="button"><i data-lucide="trash-2" aria-hidden="true"></i> Delete</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     JAVASCRIPT
+     ═══════════════════════════════════════════════════════════════════ -->
 <script>
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// State
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-const agents = {};
-let testRunning = false;
-let testStartTime = null;
-let testDuration = 30;
-let elapsedTimer = null;
-let testsRun = 0;
+'use strict';
 
-let totalChart = null;
-let clientChart = null;
-const MAX_POINTS = 120;
+/* ────────────────────────────────────────────────────────────────────
+   State
+   ──────────────────────────────────────────────────────────────────── */
+let agents = {};
+let socket = null;
+let chartThroughput = null;
+let chartPerAgent = null;
+let testStartedAt = null;
+let testDuration = 10;
+let progressTimer = null;
+let _pendingDeleteFn = null;
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Toast Notification System
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-function showToast(message, type = 'info', duration = 4000) {
-    const container = document.getElementById('toastContainer');
-    const icons = {
-        success: '<i data-lucide="check-circle"></i>',
-        error:   '<i data-lucide="alert-circle"></i>',
-        warning: '<i data-lucide="alert-triangle"></i>',
-        info:    '<i data-lucide="info"></i>',
-    };
-    const toast = document.createElement('div');
-    toast.className = `toast toast--${type}`;
-    toast.innerHTML = `
-        <div class="toast__icon">${icons[type] || icons.info}</div>
-        <div class="toast__content">
-            <div class="toast__message">${esc(message)}</div>
-        </div>
-        <button class="toast__close" onclick="this.closest('.toast').remove()">
-            <i data-lucide="x"></i>
-        </button>`;
-    container.appendChild(toast);
-    lucide.createIcons({ attrs: { 'stroke-width': 2 } });
-    setTimeout(() => {
-        toast.classList.add('exiting');
-        setTimeout(() => toast.remove(), 200);
-    }, duration);
+
+/* ────────────────────────────────────────────────────────────────────
+   Utilities
+   ──────────────────────────────────────────────────────────────────── */
+
+/** Safe fetch wrapper — catches network errors, returns null on failure */
+async function apiFetch(url, opts = {}) {
+  try {
+    const res = await fetch(url, {
+      headers: { 'Content-Type': 'application/json', ...opts.headers },
+      ...opts,
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `HTTP ${res.status}`);
+    }
+    return await res.json();
+  } catch (err) {
+    toast(err.message || 'Network error', 'error');
+    return null;
+  }
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Socket.IO
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-const socket = io({ transports: ['websocket', 'polling'] });
+/** Format bytes for display */
+function fmtSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(1) + ' MB';
+}
 
-socket.on('connect', () => {
-    document.getElementById('wsDot').classList.add('connected');
-    document.getElementById('wsLabel').textContent = 'Connected';
-    appendLog('WebSocket connected', 'success');
-});
+/** Debounce utility */
+function debounce(fn, ms) {
+  let t;
+  return function(...args) { clearTimeout(t); t = setTimeout(() => fn.apply(this, args), ms); };
+}
 
-socket.on('disconnect', () => {
-    document.getElementById('wsDot').classList.remove('connected');
-    document.getElementById('wsLabel').textContent = 'Disconnected';
-    appendLog('WebSocket disconnected', 'error');
-});
+/** Refresh Lucide icons — debounced to avoid repeated full DOM scans */
+const refreshIcons = debounce(() => {
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+}, 50);
 
-socket.on('status', (data) => {
-    if (data.test && data.test.status === 'running') {
-        setTestState('running');
-    }
-});
 
-socket.on('test_started', (data) => {
-    appendLog('Test started', 'info');
-    setTestState('running');
-    testStartTime = Date.now();
-    testDuration = data.config?.duration_sec || 30;
-    initCharts();
-});
+/* ────────────────────────────────────────────────────────────────────
+   Toast Notification System
+   ──────────────────────────────────────────────────────────────────── */
 
-socket.on('test_completed', (data) => {
-    const msg = data.error ? `Test completed with error: ${data.error}` : 'Test completed successfully';
-    appendLog(msg, data.error ? 'error' : 'success');
-    setTestState('idle');
-    testsRun++;
-    document.getElementById('testCount').textContent = testsRun;
-    refreshReports();
-    showToast(data.error ? `Test failed: ${data.error}` : 'Test completed!', data.error ? 'error' : 'success');
-});
-
-socket.on('test_error', (data) => {
-    appendLog('ERROR: ' + data.message, 'error');
-    showToast(data.message, 'error', 6000);
-});
-
-socket.on('test_log', (data) => {
-    const cls = data.message.includes('error') || data.message.includes('ERROR') ? 'error' :
-                data.message.includes('OK') || data.message.includes('✓') ? 'success' : '';
-    appendLog(data.message, cls);
-});
-
-socket.on('metrics', (data) => {
-    updateStats(data);
-    updateCharts(data);
-});
-
-socket.on('agents_update', (list) => {
-    list.forEach(a => { agents[a.id] = a; });
-    renderAgents();
-});
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Charts
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-const chartDefaults = {
-    responsive: true,
-    maintainAspectRatio: false,
-    animation: { duration: 200 },
-    interaction: { mode: 'index', intersect: false },
-    scales: {
-        x: {
-            display: true,
-            ticks: { color: '#52525b', maxTicksLimit: 10, font: { size: 10, family: "'Inter', sans-serif" } },
-            grid: { color: 'rgba(39,39,42,.4)', drawBorder: false },
-        },
-        y: {
-            display: true,
-            title: { display: true, text: 'Mbps', color: '#71717a', font: { size: 11, family: "'Inter', sans-serif" } },
-            ticks: { color: '#52525b', font: { size: 10, family: "'Inter', sans-serif" } },
-            grid: { color: 'rgba(39,39,42,.4)', drawBorder: false },
-            beginAtZero: true,
-        }
-    },
-    plugins: {
-        legend: {
-            labels: { color: '#a1a1aa', font: { size: 11, family: "'Inter', sans-serif" }, usePointStyle: true, pointStyle: 'circle', padding: 16 }
-        },
-        tooltip: {
-            backgroundColor: '#27272a',
-            titleColor: '#fafafa',
-            bodyColor: '#d4d4d8',
-            borderColor: '#3f3f46',
-            borderWidth: 1,
-            cornerRadius: 8,
-            padding: 10,
-            titleFont: { family: "'Inter', sans-serif", weight: 600 },
-            bodyFont: { family: "'JetBrains Mono', monospace", size: 12 },
-            callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(1) ?? '—'} Mbps` }
-        }
-    }
+const TOAST_ICONS = {
+  success: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+  error:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
+  warning: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+  info:    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
 };
 
-function initCharts() {
-    document.getElementById('chartsPanel').classList.remove('hidden');
-    document.getElementById('liveMetrics').classList.remove('hidden');
-    document.getElementById('progressWrap').classList.remove('hidden');
-
-    if (totalChart) totalChart.destroy();
-    if (clientChart) clientChart.destroy();
-
-    const upGrad = document.getElementById('chartTotal').getContext('2d');
-    const gradUp = upGrad.createLinearGradient(0, 0, 0, 260);
-    gradUp.addColorStop(0, 'rgba(16,185,129,.25)');
-    gradUp.addColorStop(1, 'rgba(16,185,129,.0)');
-    const gradDn = upGrad.createLinearGradient(0, 0, 0, 260);
-    gradDn.addColorStop(0, 'rgba(59,130,246,.25)');
-    gradDn.addColorStop(1, 'rgba(59,130,246,.0)');
-
-    totalChart = new Chart(document.getElementById('chartTotal'), {
-        type: 'line',
-        data: {
-            labels: [],
-            datasets: [
-                { label: 'Upload', data: [], borderColor: '#10b981', backgroundColor: gradUp, fill: true, tension: 0.35, pointRadius: 0, borderWidth: 2 },
-                { label: 'Download', data: [], borderColor: '#3b82f6', backgroundColor: gradDn, fill: true, tension: 0.35, pointRadius: 0, borderWidth: 2 },
-            ]
-        },
-        options: structuredClone(chartDefaults)
-    });
-
-    clientChart = new Chart(document.getElementById('chartClients'), {
-        type: 'line',
-        data: { labels: [], datasets: [] },
-        options: structuredClone(chartDefaults)
-    });
+function toast(message, type = 'info', duration = 4000) {
+  const container = document.getElementById('toastContainer');
+  const el = document.createElement('div');
+  el.className = `toast toast--${type}`;
+  el.innerHTML = `
+    <span class="toast__icon">${TOAST_ICONS[type] || TOAST_ICONS.info}</span>
+    <span class="toast__message">${escapeHtml(message)}</span>
+    <button class="toast__close" aria-label="Dismiss notification"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+  `;
+  el.querySelector('.toast__close').addEventListener('click', () => dismissToast(el));
+  container.appendChild(el);
+  if (duration > 0) setTimeout(() => dismissToast(el), duration);
 }
 
-const clientColors = ['#6366f1','#f59e0b','#10b981','#ef4444','#a855f7','#06b6d4','#ec4899','#84cc16','#f97316','#14b8a6'];
-let knownClients = new Set();
+function dismissToast(el) {
+  if (!el.parentNode) return;
+  el.classList.add('exiting');
+  el.addEventListener('animationend', () => el.remove(), { once: true });
+  setTimeout(() => el.remove(), 300); // fallback if animation disabled
+}
 
-function updateCharts(data) {
-    if (!totalChart) return;
-    const ts = new Date(data.timestamp * 1000).toLocaleTimeString();
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
 
-    totalChart.data.labels.push(ts);
-    totalChart.data.datasets[0].data.push(data.total_up);
-    totalChart.data.datasets[1].data.push(data.total_dn);
-    if (totalChart.data.labels.length > MAX_POINTS) {
-        totalChart.data.labels.shift();
-        totalChart.data.datasets.forEach(ds => ds.data.shift());
+
+/* ────────────────────────────────────────────────────────────────────
+   Modal Focus Trap
+   ──────────────────────────────────────────────────────────────────── */
+
+let _activeModal = null;
+let _returnFocus = null;
+
+function openModal(id) {
+  const overlay = document.getElementById(id);
+  if (!overlay) return;
+  _returnFocus = document.activeElement;
+  _activeModal = overlay;
+  overlay.classList.add('active');
+  // Focus the first input or button inside the modal
+  requestAnimationFrame(() => {
+    const focusable = overlay.querySelector('input:not([type=hidden]), select, textarea, button:not(.toast__close)');
+    if (focusable) focusable.focus();
+  });
+  overlay.addEventListener('keydown', trapFocus);
+}
+
+function closeModal(id) {
+  const overlay = document.getElementById(id);
+  if (!overlay) return;
+  overlay.classList.remove('active');
+  overlay.removeEventListener('keydown', trapFocus);
+  _activeModal = null;
+  if (_returnFocus) { _returnFocus.focus(); _returnFocus = null; }
+}
+
+function trapFocus(e) {
+  if (e.key === 'Escape') {
+    const id = _activeModal?.id;
+    if (id) closeModal(id);
+    return;
+  }
+  if (e.key !== 'Tab' || !_activeModal) return;
+  const focusable = _activeModal.querySelectorAll('input, select, textarea, button, [tabindex]:not([tabindex="-1"])');
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+}
+
+// Close modal on backdrop click
+document.addEventListener('click', (e) => {
+  if (e.target.classList.contains('modal-overlay') && e.target.classList.contains('active')) {
+    closeModal(e.target.id);
+  }
+});
+
+
+/* ────────────────────────────────────────────────────────────────────
+   Collapsible Card Sections
+   ──────────────────────────────────────────────────────────────────── */
+
+function initCollapsible(toggleId, bodyId) {
+  const toggle = document.getElementById(toggleId);
+  const body = document.getElementById(bodyId);
+  if (!toggle || !body) return;
+
+  function doToggle() {
+    const expanded = toggle.getAttribute('aria-expanded') === 'true';
+    toggle.setAttribute('aria-expanded', String(!expanded));
+    body.setAttribute('aria-hidden', String(expanded));
+    const icon = toggle.querySelector('.collapse-icon');
+    if (icon) icon.setAttribute('aria-expanded', String(!expanded));
+  }
+
+  toggle.addEventListener('click', doToggle);
+  toggle.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); doToggle(); }
+  });
+}
+
+
+/* ────────────────────────────────────────────────────────────────────
+   Agent Management
+   ──────────────────────────────────────────────────────────────────── */
+
+function renderAgents(agentList) {
+  const ul = document.getElementById('agentList');
+  const empty = document.getElementById('agentEmptyState');
+  const arr = Array.isArray(agentList) ? agentList : Object.values(agents);
+
+  if (!arr.length) {
+    ul.innerHTML = '';
+    ul.appendChild(empty);
+    empty.style.display = '';
+  } else {
+    if (empty.parentNode === ul) ul.removeChild(empty);
+    ul.innerHTML = arr.map(a => `
+      <li class="agent-card" data-id="${escapeHtml(a.id)}">
+        <span class="agent-dot ${a.status === 'online' ? 'online' : a.status === 'offline' ? 'offline' : 'unknown'}"
+              aria-label="${escapeHtml(a.status)}"></span>
+        <div class="agent-info">
+          <div class="agent-name">${escapeHtml(a.name)}</div>
+          <div class="agent-url">${escapeHtml(a.url)}</div>
+          ${a.details?.version ? `<div class="agent-meta"><span class="agent-tag">v${escapeHtml(String(a.details.version))}</span></div>` : ''}
+        </div>
+        <button class="agent-remove" aria-label="Remove ${escapeHtml(a.name)}" data-remove="${escapeHtml(a.id)}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </li>
+    `).join('');
+  }
+
+  // Update server agent dropdown
+  const sel = document.getElementById('serverAgent');
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">Select agent…</option>' +
+    arr.filter(a => a.status === 'online').map(a =>
+      `<option value="${escapeHtml(a.url)}">${escapeHtml(a.name)} (${escapeHtml(a.url)})</option>`
+    ).join('');
+  if (prev) sel.value = prev;
+
+  // Update stats
+  document.getElementById('statOnline').textContent = arr.filter(a => a.status === 'online').length;
+  document.getElementById('statTotal').textContent = arr.length;
+
+  refreshIcons();
+}
+
+// Event delegation for agent remove buttons
+document.getElementById('agentList').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-remove]');
+  if (!btn) return;
+  const id = btn.dataset.remove;
+  const agent = Object.values(agents).find(a => a.id === id);
+  confirmDelete(`Remove agent "${agent?.name || id}"?`, async () => {
+    const res = await apiFetch(`/api/agents/${id}`, { method: 'DELETE' });
+    if (res) {
+      delete agents[id];
+      renderAgents();
+      toast('Agent removed', 'success');
     }
-    totalChart.update('none');
+  });
+});
 
-    clientChart.data.labels.push(ts);
-    if (clientChart.data.labels.length > MAX_POINTS) {
-        clientChart.data.labels.shift();
-        clientChart.data.datasets.forEach(ds => ds.data.shift());
-    }
-
-    if (data.clients) {
-        Object.entries(data.clients).forEach(([name, m]) => {
-            if (!knownClients.has(name)) {
-                knownClients.add(name);
-                const ci = (knownClients.size - 1) % clientColors.length;
-                clientChart.data.datasets.push({
-                    label: name + ' ↑', data: new Array(clientChart.data.labels.length - 1).fill(null),
-                    borderColor: clientColors[ci], borderDash: [], tension: 0.35, pointRadius: 0, fill: false, borderWidth: 2,
-                });
-                clientChart.data.datasets.push({
-                    label: name + ' ↓', data: new Array(clientChart.data.labels.length - 1).fill(null),
-                    borderColor: clientColors[ci], borderDash: [5, 3], tension: 0.35, pointRadius: 0, fill: false, borderWidth: 1.5,
-                });
-            }
-            const upIdx = clientChart.data.datasets.findIndex(d => d.label === name + ' ↑');
-            const dnIdx = clientChart.data.datasets.findIndex(d => d.label === name + ' ↓');
-            if (upIdx >= 0) clientChart.data.datasets[upIdx].data.push(m.up);
-            if (dnIdx >= 0) clientChart.data.datasets[dnIdx].data.push(m.dn);
-        });
-    }
-    clientChart.update('none');
-}
-
-function updateStats(data) {
-    document.getElementById('statUp').textContent = data.total_up.toFixed(1);
-    document.getElementById('statDn').textContent = data.total_dn.toFixed(1);
-    document.getElementById('statTotal').textContent = (data.total_up + data.total_dn).toFixed(1);
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Section Toggle
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-function toggleSection(id) {
-    const body = document.getElementById(id + 'Body');
-    const icon = document.getElementById(id + 'Icon');
-    body.classList.toggle('collapsed');
-    icon.classList.toggle('collapsed');
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Test State
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-function setTestState(state) {
-    testRunning = state === 'running';
-    const badge = document.getElementById('testBadge');
-    const btnStart = document.getElementById('btnStart');
-    const btnStop = document.getElementById('btnStop');
-    const statusCard = document.getElementById('testStatusCard');
-
-    if (state === 'running') {
-        badge.className = 'status-pill status-pill--running';
-        badge.textContent = '● Running';
-        statusCard.textContent = 'Running';
-        btnStart.classList.add('hidden');
-        btnStop.classList.remove('hidden');
-        testStartTime = testStartTime || Date.now();
-        testDuration = parseInt(document.getElementById('duration').value) || 30;
-        if (elapsedTimer) clearInterval(elapsedTimer);
-        elapsedTimer = setInterval(() => {
-            const s = Math.floor((Date.now() - testStartTime) / 1000);
-            document.getElementById('statElapsed').textContent = s + 's';
-            const pct = Math.min(100, (s / testDuration) * 100);
-            document.getElementById('progressFill').style.width = pct + '%';
-            document.getElementById('progressText').textContent = Math.round(pct) + '%';
-        }, 1000);
-    } else if (state === 'stopping') {
-        badge.className = 'status-pill status-pill--stopping';
-        badge.textContent = '● Stopping';
-        statusCard.textContent = 'Stopping';
-        btnStop.disabled = true;
-    } else {
-        badge.className = 'status-pill status-pill--idle';
-        badge.textContent = '● Idle';
-        statusCard.textContent = 'Idle';
-        btnStart.classList.remove('hidden');
-        btnStop.classList.add('hidden');
-        btnStop.disabled = false;
-        if (elapsedTimer) clearInterval(elapsedTimer);
-        testStartTime = null;
-        knownClients = new Set();
-        document.getElementById('progressFill').style.width = '100%';
-        document.getElementById('progressText').textContent = '100%';
-    }
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// API Helper
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-async function api(method, url, body) {
-    const opts = { method, headers: { 'Content-Type': 'application/json' } };
-    if (body !== undefined) opts.body = JSON.stringify(body);
-    const res = await fetch(url, opts);
-    return res.json();
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Agents
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 async function discoverAgents() {
-    appendLog('Discovering agents via UDP broadcast…', 'info');
-    showToast('Scanning network for agents…', 'info', 3000);
-    const data = await api('POST', '/api/agents/discover');
-    appendLog(`Found ${data.discovered} agent(s)`, data.discovered > 0 ? 'success' : '');
-    if (data.agents) {
-        data.agents.forEach(a => { agents[a.id] = a; });
-        renderAgents();
-    }
-    showToast(`Discovered ${data.discovered} agent(s)`, data.discovered > 0 ? 'success' : 'warning');
+  const btn = document.getElementById('btnDiscover');
+  const origText = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Scanning…';
+
+  const data = await apiFetch('/api/agents/discover', { method: 'POST', body: '{}' });
+  btn.disabled = false;
+  btn.innerHTML = origText;
+  refreshIcons();
+
+  if (!data) return;
+  if (data.discovered > 0) {
+    data.agents.forEach(a => { agents[a.id] = a; });
+    renderAgents();
+    toast(`Discovered ${data.discovered} agent(s)`, 'success');
+  } else {
+    toast('No agents found on network', 'warning');
+  }
 }
 
 async function addAgent() {
-    const url = document.getElementById('agentUrl').value.trim();
-    const name = document.getElementById('agentName').value.trim();
-    const apiKey = document.getElementById('agentApiKey').value.trim();
-    if (!url) { showToast('Agent URL is required', 'warning'); return; }
-    try {
-        const data = await api('POST', '/api/agents', { url, name, api_key: apiKey });
-        if (data.id) {
-            agents[data.id] = data;
-            renderAgents();
-            hideAddAgentModal();
-            showToast(`Agent added: ${data.name}`, 'success');
-            appendLog(`Agent added: ${data.name} (${data.status})`, 'success');
-        } else if (data.error) {
-            showToast(data.error, 'error');
-        }
-    } catch (e) {
-        showToast('Failed to add agent: ' + e.message, 'error');
-    }
-}
+  const url = document.getElementById('agentUrl').value.trim();
+  const name = document.getElementById('agentName').value.trim();
+  const key = document.getElementById('agentApiKey').value.trim();
 
-async function removeAgent(id) {
-    const a = agents[id];
-    await api('DELETE', `/api/agents/${id}`);
-    delete agents[id];
+  if (!url) { toast('Agent URL is required', 'error'); return; }
+
+  const btn = document.getElementById('btnConfirmAgent');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Connecting…';
+
+  const data = await apiFetch('/api/agents', {
+    method: 'POST',
+    body: JSON.stringify({ url, name, api_key: key }),
+  });
+
+  btn.disabled = false;
+  btn.innerHTML = '<i data-lucide="plus" aria-hidden="true"></i> Add Agent';
+  refreshIcons();
+
+  if (data) {
+    agents[data.id] = data;
     renderAgents();
-    showToast(`Removed agent: ${a?.name || id}`, 'info');
-}
-
-function renderAgents() {
-    const el = document.getElementById('agentList');
-    const keys = Object.keys(agents);
-
-    // Update overview cards
-    document.getElementById('totalAgents').textContent = keys.length;
-    document.getElementById('onlineAgents').textContent = keys.filter(id => agents[id].status === 'online').length;
-
-    if (keys.length === 0) {
-        el.innerHTML = `<li class="empty-state" id="agentEmpty">
-            <i data-lucide="wifi-off"></i>
-            <p>No agents connected</p>
-            <span>Click Discover or + to get started</span>
-        </li>`;
-    } else {
-        el.innerHTML = keys.map(id => {
-            const a = agents[id];
-            const st = a.status || 'unknown';
-            const ips = a.details?.ips || [];
-            const servers = a.details?.servers || [];
-            const onlineSrv = servers.filter(s => s.alive).length;
-            return `<li class="agent-card">
-                <div class="agent-status-dot ${st}"></div>
-                <div class="agent-info">
-                    <div class="agent-name">${esc(a.name)}</div>
-                    <div class="agent-url">${esc(a.url)}</div>
-                    <div class="agent-meta">
-                        ${ips.length ? `<span class="agent-tag">${esc(ips[0])}</span>` : ''}
-                        ${servers.length ? `<span class="agent-tag">${onlineSrv}/${servers.length} srv</span>` : ''}
-                    </div>
-                </div>
-                <button class="agent-remove" onclick="removeAgent('${id}')" title="Remove">
-                    <i data-lucide="x"></i>
-                </button>
-            </li>`;
-        }).join('');
-    }
-    lucide.createIcons({ attrs: { 'stroke-width': 2 } });
-    updateAgentDropdowns();
-}
-
-function updateAgentDropdowns() {
-    const keys = Object.keys(agents);
-    const opts = '<option value="">— Select —</option>' +
-        keys.map(id => `<option value="${esc(agents[id].url)}">${esc(agents[id].name)}</option>`).join('');
-    document.getElementById('serverAgent').innerHTML = opts;
-    document.querySelectorAll('.client-agent-select').forEach(sel => {
-        const cur = sel.value;
-        sel.innerHTML = opts;
-        sel.value = cur;
-    });
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Clients Table
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-let clientCounter = 0;
-
-function addClientRow(data) {
-    clientCounter++;
-    const tbody = document.getElementById('clientsBody');
-    const tr = document.createElement('tr');
-    tr.dataset.idx = clientCounter;
-    tr.innerHTML = `
-        <td><input class="client-name" value="${esc(data?.name || 'Client-' + clientCounter)}" style="width:100px"></td>
-        <td><select class="client-agent-select" style="width:160px">
-            <option value="">— Select —</option>
-            ${Object.keys(agents).map(id => `<option value="${esc(agents[id].url)}">${esc(agents[id].name)}</option>`).join('')}
-        </select></td>
-        <td><input class="client-target" value="${esc(data?.target || '')}" placeholder="192.168.x.x" style="width:130px"></td>
-        <td><select class="client-proto" style="width:70px">
-            <option value="" ${!data?.proto ? 'selected' : ''}>—</option>
-            <option value="tcp" ${data?.proto === 'tcp' ? 'selected' : ''}>TCP</option>
-            <option value="udp" ${data?.proto === 'udp' ? 'selected' : ''}>UDP</option>
-        </select></td>
-        <td><input class="client-parallel" type="number" value="${data?.parallel || ''}" min="1" style="width:55px"></td>
-        <td class="checkbox-cell"><input class="client-bidir" type="checkbox" ${data?.bidir ? 'checked' : ''}></td>
-        <td><button class="btn-icon" style="color:var(--red)" onclick="this.closest('tr').remove()" title="Remove">
-            <i data-lucide="trash-2"></i>
-        </button></td>`;
-    tbody.appendChild(tr);
-    if (data?.agent) tr.querySelector('.client-agent-select').value = data.agent;
-    lucide.createIcons({ attrs: { 'stroke-width': 2 } });
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Config Build / Load
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-function buildConfig() {
-    const mode = document.querySelector('input[name="mode"]:checked')?.value || 'bidir';
-    const clients = [];
-    document.querySelectorAll('#clientsBody tr').forEach(tr => {
-        clients.push({
-            name: tr.querySelector('.client-name').value || 'unnamed',
-            agent: tr.querySelector('.client-agent-select').value,
-            target: tr.querySelector('.client-target').value,
-            proto: tr.querySelector('.client-proto').value || undefined,
-            parallel: parseInt(tr.querySelector('.client-parallel').value) || undefined,
-            bidir: tr.querySelector('.client-bidir').checked || undefined,
-        });
-    });
-    return {
-        server: { agent: document.getElementById('serverAgent').value, bind: document.getElementById('serverBind').value },
-        clients, mode,
-        duration_sec: parseInt(document.getElementById('duration').value) || 30,
-        base_port: parseInt(document.getElementById('basePort').value) || 5211,
-        poll_interval_sec: parseFloat(document.getElementById('pollInterval').value) || 1.0,
-        proto: document.getElementById('proto').value,
-        parallel: parseInt(document.getElementById('parallel').value) || 1,
-        omit: parseInt(document.getElementById('omit').value) || 0,
-        bitrate: document.getElementById('bitrate').value || undefined,
-        tcp_window: document.getElementById('tcpWindow').value || undefined,
-        api_key: document.getElementById('apiKey').value || undefined,
-    };
-}
-
-function loadConfig(cfg) {
-    if (cfg.server) {
-        document.getElementById('serverAgent').value = cfg.server.agent || '';
-        document.getElementById('serverBind').value = cfg.server.bind || '';
-    }
-    if (cfg.server_agent) document.getElementById('serverAgent').value = cfg.server_agent || '';
-    if (cfg.server_bind)  document.getElementById('serverBind').value = cfg.server_bind || '';
-    document.getElementById('duration').value = cfg.duration_sec || 30;
-    document.getElementById('basePort').value = cfg.base_port || 5211;
-    document.getElementById('pollInterval').value = cfg.poll_interval_sec || 1.0;
-    document.getElementById('proto').value = cfg.proto || 'tcp';
-    document.getElementById('parallel').value = cfg.parallel || 1;
-    document.getElementById('omit').value = cfg.omit ?? 1;
-    document.getElementById('bitrate').value = cfg.bitrate || '';
-    document.getElementById('tcpWindow').value = cfg.tcp_window || '';
-    document.getElementById('apiKey').value = cfg.api_key || '';
-    const mode = cfg.mode || 'bidir';
-    const radio = document.querySelector(`input[name="mode"][value="${mode}"]`);
-    if (radio) radio.checked = true;
-    document.getElementById('clientsBody').innerHTML = '';
-    clientCounter = 0;
-    if (cfg.clients) cfg.clients.forEach(c => addClientRow(c));
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Test Control
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-async function startTest() {
-    const cfg = buildConfig();
-    if (!cfg.server?.agent) {
-        showToast('Select a server agent first', 'warning');
-        return;
-    }
-    if (!cfg.clients || cfg.clients.length === 0) {
-        showToast('Add at least one client', 'warning');
-        return;
-    }
-    appendLog('Starting test…', 'info');
-    setTestState('running');
-    try {
-        await api('POST', '/api/test/start', cfg);
-    } catch (e) {
-        appendLog('Failed to start: ' + e.message, 'error');
-        showToast('Failed to start test', 'error');
-        setTestState('idle');
-    }
-}
-
-async function stopTest() {
-    appendLog('Stopping test…', 'info');
-    setTestState('stopping');
-    await api('POST', '/api/test/stop');
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Profiles
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-async function refreshProfiles() {
-    const list = await api('GET', '/api/profiles');
-    const sel = document.getElementById('profileSelect');
-    sel.innerHTML = '<option value="">Select profile…</option>' +
-        list.map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join('');
-}
-
-async function loadSelectedProfile() {
-    const name = document.getElementById('profileSelect').value;
-    if (!name) return;
-    const data = await api('GET', `/api/profiles/${encodeURIComponent(name)}`);
-    if (data.config) {
-        loadConfig(data.config);
-        showToast(`Loaded profile: ${name}`, 'success');
-        appendLog(`Profile loaded: ${name}`, 'info');
-    }
-}
-
-function promptSaveProfile() {
-    document.getElementById('profileName').value = '';
-    document.getElementById('saveProfileModal').classList.add('active');
-    document.getElementById('profileName').focus();
-}
-
-function hideSaveProfileModal() {
-    document.getElementById('saveProfileModal').classList.remove('active');
-}
-
-async function saveProfile() {
-    const name = document.getElementById('profileName').value.trim();
-    if (!name) { showToast('Enter a profile name', 'warning'); return; }
-    const cfg = buildConfig();
-    await api('POST', '/api/profiles', { name, config: cfg });
-    showToast(`Profile saved: ${name}`, 'success');
-    appendLog(`Profile saved: ${name}`, 'success');
-    hideSaveProfileModal();
-    refreshProfiles();
-}
-
-async function deleteSelectedProfile() {
-    const name = document.getElementById('profileSelect').value;
-    if (!name) return;
-    await api('DELETE', `/api/profiles/${encodeURIComponent(name)}`);
-    showToast(`Profile deleted: ${name}`, 'info');
-    appendLog(`Profile deleted: ${name}`, 'info');
-    refreshProfiles();
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Reports
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-async function refreshReports() {
-    const list = await api('GET', '/api/reports');
-    const el = document.getElementById('reportsList');
-    if (!list || list.length === 0) {
-        el.innerHTML = '<li class="empty-state-sm">No reports yet</li>';
-        return;
-    }
-    el.innerHTML = list.map(f => {
-        const size = f.size > 1048576 ? (f.size / 1048576).toFixed(1) + ' MB' :
-                     f.size > 1024 ? (f.size / 1024).toFixed(1) + ' KB' : f.size + ' B';
-        return `<li class="report-item">
-            <a href="/api/reports/${encodeURIComponent(f.name)}" target="_blank">${esc(f.name)}</a>
-            <span class="file-size">${size}</span>
-        </li>`;
-    }).join('');
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Log
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-function appendLog(msg, cls) {
-    const el = document.getElementById('logOutput');
-    const line = document.createElement('div');
-    line.className = 'log-line' + (cls ? ' ' + cls : '');
-    const ts = new Date().toLocaleTimeString('en-GB', { hour12: false });
-    line.textContent = `${ts}  ${msg}`;
-    el.appendChild(line);
-    el.scrollTop = el.scrollHeight;
-    // Keep max 500 lines
-    while (el.children.length > 500) el.removeChild(el.firstChild);
-}
-
-function clearLog() {
-    document.getElementById('logOutput').innerHTML = '';
-    appendLog('Log cleared', 'info');
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Modals
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-function showAddAgentModal() {
+    closeModal('addAgentModal');
     document.getElementById('agentUrl').value = '';
     document.getElementById('agentName').value = '';
     document.getElementById('agentApiKey').value = '';
-    document.getElementById('addAgentModal').classList.add('active');
-    setTimeout(() => document.getElementById('agentUrl').focus(), 100);
+    toast(`Agent "${data.name}" added (${data.status})`, data.status === 'online' ? 'success' : 'warning');
+  }
 }
 
-function hideAddAgentModal() {
-    document.getElementById('addAgentModal').classList.remove('active');
+async function refreshAgents() {
+  const data = await apiFetch('/api/agents?refresh=1');
+  if (data) {
+    agents = {};
+    data.forEach(a => { agents[a.id] = a; });
+    renderAgents();
+  }
 }
 
-document.querySelectorAll('.modal-overlay').forEach(ov => {
-    ov.addEventListener('click', e => {
-        if (e.target === ov) ov.classList.remove('active');
-    });
-});
 
-document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') {
-        document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
+/* ────────────────────────────────────────────────────────────────────
+   Profiles
+   ──────────────────────────────────────────────────────────────────── */
+
+async function refreshProfiles() {
+  const data = await apiFetch('/api/profiles');
+  if (!data) return;
+  const sel = document.getElementById('profileSelect');
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">Select profile…</option>' +
+    data.map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`).join('');
+  if (prev) sel.value = prev;
+}
+
+async function loadSelectedProfile() {
+  const name = document.getElementById('profileSelect').value;
+  if (!name) { toast('Select a profile first', 'warning'); return; }
+  const data = await apiFetch(`/api/profiles/${encodeURIComponent(name)}`);
+  if (!data) return;
+  applyConfig(data.config);
+  toast(`Profile "${name}" loaded`, 'success');
+}
+
+function buildConfig() {
+  const rows = document.querySelectorAll('#clientsBody tr');
+  const clientList = [];
+  rows.forEach(tr => {
+    const selects = tr.querySelectorAll('select');
+    const inputs = tr.querySelectorAll('input');
+    if (selects[0]?.value) {
+      clientList.push({
+        agent: selects[0].value,
+        name: inputs[0]?.value || '',
+        server_target: inputs[1]?.value || '',
+        api_key: inputs[2]?.value || '',
+      });
     }
-});
+  });
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Utilities
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-function esc(s) {
-    if (!s) return '';
-    const d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
+  const mode = document.querySelector('input[name="mode"]:checked')?.value || 'bidir';
+
+  return {
+    server_agent: document.getElementById('serverAgent').value,
+    server_bind: document.getElementById('serverBind').value,
+    api_key: document.getElementById('apiKey').value,
+    duration_sec: parseInt(document.getElementById('duration').value) || 10,
+    base_port: parseInt(document.getElementById('basePort').value) || 5201,
+    poll_interval_sec: parseFloat(document.getElementById('pollInterval').value) || 1,
+    protocol: document.getElementById('proto').value,
+    parallel: parseInt(document.getElementById('parallel').value) || 1,
+    omit_sec: parseInt(document.getElementById('omit').value) || 1,
+    bitrate: document.getElementById('bitrate').value || '0',
+    tcp_window: document.getElementById('tcpWindow').value || '',
+    mode: mode,
+    clients: clientList,
+  };
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Init
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-(async function init() {
-    lucide.createIcons({ attrs: { 'stroke-width': 2 } });
+function applyConfig(cfg) {
+  if (!cfg) return;
+  if (cfg.server_agent) document.getElementById('serverAgent').value = cfg.server_agent;
+  if (cfg.server_bind) document.getElementById('serverBind').value = cfg.server_bind;
+  if (cfg.api_key !== undefined) document.getElementById('apiKey').value = cfg.api_key;
+  if (cfg.duration_sec) document.getElementById('duration').value = cfg.duration_sec;
+  if (cfg.base_port) document.getElementById('basePort').value = cfg.base_port;
+  if (cfg.poll_interval_sec) document.getElementById('pollInterval').value = cfg.poll_interval_sec;
+  if (cfg.protocol) document.getElementById('proto').value = cfg.protocol;
+  if (cfg.parallel) document.getElementById('parallel').value = cfg.parallel;
+  if (cfg.omit_sec !== undefined) document.getElementById('omit').value = cfg.omit_sec;
+  if (cfg.bitrate !== undefined) document.getElementById('bitrate').value = cfg.bitrate;
+  if (cfg.tcp_window !== undefined) document.getElementById('tcpWindow').value = cfg.tcp_window;
+  if (cfg.mode) {
+    const radio = document.getElementById(`mode_${cfg.mode}`);
+    if (radio) radio.checked = true;
+  }
+  // Rebuild client rows
+  document.getElementById('clientsBody').innerHTML = '';
+  if (cfg.clients) {
+    cfg.clients.forEach(c => addClientRow(c));
+  }
+}
+
+async function promptSaveProfile() {
+  const current = document.getElementById('profileSelect').value;
+  document.getElementById('profileName').value = current || '';
+  openModal('saveProfileModal');
+}
+
+async function saveProfile() {
+  const name = document.getElementById('profileName').value.trim();
+  if (!name) { toast('Profile name is required', 'error'); return; }
+  const config = buildConfig();
+  const btn = document.getElementById('btnConfirmProfile');
+  btn.disabled = true;
+  const data = await apiFetch('/api/profiles', {
+    method: 'POST',
+    body: JSON.stringify({ name, config }),
+  });
+  btn.disabled = false;
+  if (data) {
+    closeModal('saveProfileModal');
     await refreshProfiles();
-    await refreshReports();
-    addClientRow();
-    appendLog('Dashboard ready', 'info');
-})();
+    document.getElementById('profileSelect').value = data.name || name;
+    toast(`Profile "${name}" saved`, 'success');
+  }
+}
+
+async function deleteSelectedProfile() {
+  const name = document.getElementById('profileSelect').value;
+  if (!name) { toast('Select a profile first', 'warning'); return; }
+  confirmDelete(`Delete profile "${name}"?`, async () => {
+    const res = await apiFetch(`/api/profiles/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    if (res) {
+      await refreshProfiles();
+      toast(`Profile "${name}" deleted`, 'success');
+    }
+  });
+}
+
+
+/* ────────────────────────────────────────────────────────────────────
+   Confirm Delete Dialog
+   ──────────────────────────────────────────────────────────────────── */
+
+function confirmDelete(message, onConfirm) {
+  document.getElementById('deleteConfirmMsg').textContent = message;
+  _pendingDeleteFn = onConfirm;
+  openModal('deleteConfirmModal');
+}
+
+
+/* ────────────────────────────────────────────────────────────────────
+   Client Rows
+   ──────────────────────────────────────────────────────────────────── */
+
+function addClientRow(data) {
+  const tbody = document.getElementById('clientsBody');
+  const tr = document.createElement('tr');
+  const onlineAgents = Object.values(agents).filter(a => a.status === 'online');
+  const options = onlineAgents.map(a =>
+    `<option value="${escapeHtml(a.url)}" ${data?.agent === a.url ? 'selected' : ''}>${escapeHtml(a.name)}</option>`
+  ).join('');
+
+  tr.innerHTML = `
+    <td><input type="checkbox" aria-label="Select row"></td>
+    <td><select aria-label="Client agent">${options ? options : '<option value="">No agents</option>'}</select></td>
+    <td><input type="text" value="${escapeHtml(data?.name || '')}" placeholder="Client name" aria-label="Client name"></td>
+    <td><input type="text" value="${escapeHtml(data?.server_target || '')}" placeholder="Auto" aria-label="Server target"></td>
+    <td><input type="password" value="${escapeHtml(data?.api_key || '')}" placeholder="Optional" aria-label="API key" autocomplete="off"></td>
+    <td><button class="btn-icon" aria-label="Remove row" data-remove-row>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button></td>
+  `;
+  tbody.appendChild(tr);
+}
+
+// Event delegation for removing client rows
+document.getElementById('clientsTable').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-remove-row]');
+  if (btn) btn.closest('tr').remove();
+});
+
+// Select-all checkbox
+document.getElementById('selectAllClients').addEventListener('change', function() {
+  document.querySelectorAll('#clientsBody input[type=checkbox]').forEach(cb => { cb.checked = this.checked; });
+});
+
+
+/* ────────────────────────────────────────────────────────────────────
+   Reports
+   ──────────────────────────────────────────────────────────────────── */
+
+async function refreshReports() {
+  const data = await apiFetch('/api/reports');
+  if (!data) return;
+  const ul = document.getElementById('reportList');
+  document.getElementById('statReports').textContent = data.length;
+  if (!data.length) {
+    ul.innerHTML = '<li class="empty-state-sm">No reports yet</li>';
+    return;
+  }
+  ul.innerHTML = data.map(r =>
+    `<li class="report-item">
+      <a href="/api/reports/${encodeURIComponent(r.name)}" download>${escapeHtml(r.name)}</a>
+      <span class="file-size">${fmtSize(r.size)}</span>
+    </li>`
+  ).join('');
+}
+
+
+/* ────────────────────────────────────────────────────────────────────
+   Test Control
+   ──────────────────────────────────────────────────────────────────── */
+
+function validateConfig(config) {
+  if (!config.server_agent) return 'Select a server agent';
+  if (!config.clients.length) return 'Add at least one client agent';
+  if (config.duration_sec < 1) return 'Duration must be at least 1 second';
+  return null;
+}
+
+async function startTest() {
+  const config = buildConfig();
+  const error = validateConfig(config);
+  if (error) { toast(error, 'error'); return; }
+
+  const btn = document.getElementById('btnStartTest');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Starting…';
+
+  const data = await apiFetch('/api/test/start', {
+    method: 'POST',
+    body: JSON.stringify(config),
+  });
+
+  if (!data) {
+    btn.disabled = false;
+    btn.innerHTML = '<i data-lucide="play" aria-hidden="true"></i> Start Test';
+    refreshIcons();
+    return;
+  }
+
+  testDuration = config.duration_sec;
+  testStartedAt = Date.now() / 1000;
+  setTestUI('running');
+}
+
+async function stopTest() {
+  const btn = document.getElementById('btnStopTest');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Stopping…';
+  await apiFetch('/api/test/stop', { method: 'POST' });
+  setTestUI('stopping');
+}
+
+function setTestUI(status) {
+  const startBtn = document.getElementById('btnStartTest');
+  const stopBtn = document.getElementById('btnStopTest');
+  const pill = document.getElementById('testStatusPill');
+  const liveSection = document.getElementById('liveSection');
+
+  pill.className = 'status-pill';
+  pill.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+  document.getElementById('statStatus').textContent = status.charAt(0).toUpperCase() + status.slice(1);
+
+  if (status === 'running') {
+    pill.classList.add('status-pill--running');
+    startBtn.disabled = true;
+    startBtn.innerHTML = '<span class="spinner"></span> Running…';
+    stopBtn.disabled = false;
+    stopBtn.innerHTML = '<i data-lucide="square" aria-hidden="true"></i> Stop';
+    liveSection.style.display = '';
+    startProgressTimer();
+  } else if (status === 'stopping') {
+    pill.classList.add('status-pill--stopping');
+    stopBtn.disabled = true;
+    stopBtn.innerHTML = '<span class="spinner"></span> Stopping…';
+  } else {
+    pill.classList.add('status-pill--idle');
+    startBtn.disabled = false;
+    startBtn.innerHTML = '<i data-lucide="play" aria-hidden="true"></i> Start Test';
+    stopBtn.disabled = true;
+    stopBtn.innerHTML = '<i data-lucide="square" aria-hidden="true"></i> Stop';
+    stopProgressTimer();
+  }
+  refreshIcons();
+}
+
+
+/* ────────────────────────────────────────────────────────────────────
+   Progress Bar
+   ──────────────────────────────────────────────────────────────────── */
+
+function startProgressTimer() {
+  stopProgressTimer();
+  progressTimer = setInterval(() => {
+    if (!testStartedAt || !testDuration) return;
+    const elapsed = (Date.now() / 1000) - testStartedAt;
+    const pct = Math.min(100, (elapsed / testDuration) * 100);
+    document.getElementById('progressFill').style.width = pct + '%';
+    document.getElementById('progressText').textContent = Math.round(pct) + '%';
+    document.getElementById('metricElapsed').textContent = Math.round(elapsed) + 's';
+    const bar = document.querySelector('.progress-bar');
+    bar.setAttribute('aria-valuenow', Math.round(pct));
+  }, 500);
+}
+
+function stopProgressTimer() {
+  if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+}
+
+
+/* ────────────────────────────────────────────────────────────────────
+   Charts
+   ──────────────────────────────────────────────────────────────────── */
+
+function initCharts() {
+  if (typeof Chart === 'undefined') return;
+
+  const gridColor = 'rgba(39,39,42,0.6)';
+  const commonOpts = {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: 300 },
+    plugins: { legend: { labels: { color: '#a1a1aa', font: { size: 11 } } } },
+    scales: {
+      x: { grid: { color: gridColor }, ticks: { color: '#71717a', maxTicksLimit: 10 } },
+      y: { grid: { color: gridColor }, ticks: { color: '#71717a' }, beginAtZero: true },
+    },
+  };
+
+  chartThroughput = new Chart(document.getElementById('chartThroughput'), {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [
+        { label: 'Upload (Mbps)', data: [], borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.08)', fill: true, tension: 0.3, pointRadius: 0 },
+        { label: 'Download (Mbps)', data: [], borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.08)', fill: true, tension: 0.3, pointRadius: 0 },
+      ],
+    },
+    options: commonOpts,
+  });
+
+  chartPerAgent = new Chart(document.getElementById('chartPerAgent'), {
+    type: 'bar',
+    data: { labels: [], datasets: [
+      { label: 'Upload', data: [], backgroundColor: 'rgba(16,185,129,0.7)' },
+      { label: 'Download', data: [], backgroundColor: 'rgba(59,130,246,0.7)' },
+    ]},
+    options: {
+      ...commonOpts,
+      plugins: { ...commonOpts.plugins, legend: { ...commonOpts.plugins.legend, display: true } },
+    },
+  });
+}
+
+
+/* ────────────────────────────────────────────────────────────────────
+   Logging
+   ──────────────────────────────────────────────────────────────────── */
+
+function appendLog(msg, type = '') {
+  const log = document.getElementById('logOutput');
+  const line = document.createElement('div');
+  line.className = 'log-line' + (type ? ' ' + type : '');
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
+
+
+/* ────────────────────────────────────────────────────────────────────
+   Socket.IO
+   ──────────────────────────────────────────────────────────────────── */
+
+function initSocket() {
+  if (typeof io === 'undefined') {
+    setTimeout(initSocket, 100);
+    return;
+  }
+
+  socket = io({ transports: ['websocket', 'polling'] });
+  const dot = document.getElementById('wsDot');
+  const label = document.getElementById('wsLabel');
+
+  socket.on('connect', () => {
+    dot.classList.add('connected');
+    label.textContent = 'Connected';
+    appendLog('WebSocket connected', 'success');
+  });
+
+  socket.on('disconnect', () => {
+    dot.classList.remove('connected');
+    label.textContent = 'Disconnected';
+    appendLog('WebSocket disconnected', 'error');
+  });
+
+  socket.on('status', (data) => {
+    if (data.test) {
+      const st = data.test.status || 'idle';
+      setTestUI(st);
+      if (st === 'running' && data.test.started_at) {
+        testStartedAt = data.test.started_at;
+        testDuration = data.test.config?.duration_sec || 10;
+      }
+    }
+  });
+
+  socket.on('test_started', (data) => {
+    testStartedAt = data.ts;
+    testDuration = data.config?.duration_sec || 10;
+    setTestUI('running');
+    appendLog(`Test started → ${data.csv}`, 'info');
+    toast('Test started', 'success');
+    // Reset charts
+    if (chartThroughput) {
+      chartThroughput.data.labels = [];
+      chartThroughput.data.datasets.forEach(d => d.data = []);
+      chartThroughput.update('none');
+    }
+  });
+
+  socket.on('test_completed', (data) => {
+    setTestUI('idle');
+    appendLog(`Test completed → ${data.csv}${data.error ? ' (with errors)' : ''}`, data.error ? 'error' : 'success');
+    toast(data.error ? `Test finished with error: ${data.error}` : 'Test completed successfully', data.error ? 'warning' : 'success');
+    refreshReports();
+  });
+
+  socket.on('test_error', (data) => {
+    appendLog(`Error: ${data.message}`, 'error');
+    toast(data.message, 'error');
+  });
+
+  socket.on('test_log', (data) => {
+    appendLog(data.message);
+  });
+
+  socket.on('metrics', (data) => {
+    // Update live metric numbers
+    document.getElementById('metricUp').textContent = (data.total_up || 0).toFixed(2);
+    document.getElementById('metricDn').textContent = (data.total_dn || 0).toFixed(2);
+    document.getElementById('metricTotal').textContent = ((data.total_up || 0) + (data.total_dn || 0)).toFixed(2);
+
+    // Update throughput chart
+    if (chartThroughput) {
+      const t = chartThroughput.data;
+      const label = new Date(data.timestamp * 1000).toLocaleTimeString();
+      t.labels.push(label);
+      t.datasets[0].data.push(data.total_up || 0);
+      t.datasets[1].data.push(data.total_dn || 0);
+      if (t.labels.length > 120) {
+        t.labels.shift();
+        t.datasets.forEach(d => d.data.shift());
+      }
+      chartThroughput.update('none');
+    }
+
+    // Update per-agent chart
+    if (chartPerAgent && data.clients) {
+      const names = Object.keys(data.clients);
+      chartPerAgent.data.labels = names;
+      chartPerAgent.data.datasets[0].data = names.map(n => data.clients[n].up || 0);
+      chartPerAgent.data.datasets[1].data = names.map(n => data.clients[n].dn || 0);
+      chartPerAgent.update('none');
+    }
+  });
+
+  socket.on('agents_update', (data) => {
+    agents = {};
+    data.forEach(a => { agents[a.id] = a; });
+    renderAgents();
+  });
+}
+
+
+/* ────────────────────────────────────────────────────────────────────
+   Event Bindings
+   ──────────────────────────────────────────────────────────────────── */
+
+document.addEventListener('DOMContentLoaded', async () => {
+  // Initialize icons
+  refreshIcons();
+
+  // Collapsible sections
+  initCollapsible('testConfigToggle', 'testConfigBody');
+  initCollapsible('logToggle', 'logBody');
+
+  // Button bindings
+  document.getElementById('btnDiscover').addEventListener('click', discoverAgents);
+  document.getElementById('btnAddAgent').addEventListener('click', () => openModal('addAgentModal'));
+  document.getElementById('btnConfirmAgent').addEventListener('click', addAgent);
+  document.getElementById('btnCancelAgent').addEventListener('click', () => closeModal('addAgentModal'));
+  document.getElementById('btnLoadProfile').addEventListener('click', loadSelectedProfile);
+  document.getElementById('btnSaveProfile').addEventListener('click', () => promptSaveProfile());
+  document.getElementById('btnDeleteProfile').addEventListener('click', deleteSelectedProfile);
+  document.getElementById('btnConfirmProfile').addEventListener('click', saveProfile);
+  document.getElementById('btnCancelProfile').addEventListener('click', () => closeModal('saveProfileModal'));
+  document.getElementById('btnConfirmDelete').addEventListener('click', () => {
+    closeModal('deleteConfirmModal');
+    if (_pendingDeleteFn) { _pendingDeleteFn(); _pendingDeleteFn = null; }
+  });
+  document.getElementById('btnCancelDelete').addEventListener('click', () => {
+    closeModal('deleteConfirmModal');
+    _pendingDeleteFn = null;
+  });
+  document.getElementById('btnStartTest').addEventListener('click', startTest);
+  document.getElementById('btnStopTest').addEventListener('click', stopTest);
+  document.getElementById('btnAddClientRow').addEventListener('click', () => addClientRow());
+  document.getElementById('btnClearLog').addEventListener('click', () => { document.getElementById('logOutput').innerHTML = ''; });
+  document.getElementById('btnRefreshReports').addEventListener('click', refreshReports);
+
+  // Initialize charts
+  initCharts();
+
+  // Initialize Socket.IO
+  initSocket();
+
+  // Load initial data
+  await Promise.all([refreshAgents(), refreshProfiles(), refreshReports()]);
+
+  appendLog('Dashboard initialized', 'info');
+});
 </script>
 </body>
 </html>
