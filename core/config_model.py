@@ -157,7 +157,7 @@ class TestConfig:
         )
 
     def to_controller_dict(self) -> dict[str, Any]:
-        """Produce a dict suitable for controller_v5_18.py --config."""
+        """Produce a dict suitable for test_runner.run_test()."""
         d = self.to_dict()
         d['keep_servers_open'] = self.keep_servers_open
         return d

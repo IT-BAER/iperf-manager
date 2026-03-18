@@ -1,14 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-build.py - iperf_manager 배포 빌드 스크립트
+build.py - iperf-manager build script (agent only)
 
 Usage:
-    python build.py              # agent + dashboard 둘 다 빌드
-    python build.py agent        # agent만 빌드
-    python build.py dashboard    # dashboard만 빌드
-    python build.py --onefile    # onefile 모드만
-    python build.py --onedir     # onedir 모드만 (기본: 둘 다)
-    python build.py --no-zip     # zip 압축 생략
+    python build.py              # build agent
+    python build.py --onefile    # onefile mode only
+    python build.py --onedir     # onedir mode only (default: both)
+    python build.py --no-zip     # skip zip compression
 """
 import argparse
 import shutil
@@ -22,18 +20,13 @@ RELEASE_DIR = ROOT / 'release'
 
 # Version from constants
 sys.path.insert(0, str(ROOT))
-from core.constants import AGENT_VERSION, DASHBOARD_VERSION
+from core.constants import AGENT_VERSION
 
 TARGETS = {
     'agent': {
         'spec': ROOT / 'agent.spec',
         'name': 'iperf3-agent',
         'version': AGENT_VERSION,
-    },
-    'dashboard': {
-        'spec': ROOT / 'dashboard.spec',
-        'name': 'iperf3-dashboard',
-        'version': DASHBOARD_VERSION,
     },
 }
 
@@ -133,9 +126,7 @@ def build_target(name: str, modes: list[str], do_zip: bool):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='iperf_manager build script')
-    parser.add_argument('targets', nargs='*', default=[],
-                        help='Build targets: agent, dashboard (default: both)')
+    parser = argparse.ArgumentParser(description='iperf-manager build script')
     parser.add_argument('--onefile', action='store_true',
                         help='Build onefile only')
     parser.add_argument('--onedir', action='store_true',
@@ -144,13 +135,7 @@ def main():
                         help='Skip zip compression')
     args = parser.parse_args()
 
-    # Determine targets
-    targets = [t for t in args.targets if t]
-    for t in targets:
-        if t not in TARGETS:
-            parser.error(f'unknown target: {t} (choose from {", ".join(TARGETS)})')
-    if not targets:
-        targets = ['agent', 'dashboard']
+    targets = ['agent']
 
     # Determine modes
     if args.onefile and not args.onedir:

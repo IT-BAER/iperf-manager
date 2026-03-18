@@ -8,6 +8,7 @@ Extracted from agent_gui_v6_0_2.py with all tkinter dependencies removed.
 import threading
 import time
 import json
+import hmac
 import subprocess
 import socket
 import os
@@ -27,6 +28,7 @@ from core.helpers import (
     resolve_log_dir,
     resolve_iperf3_path,
     list_local_ipv4,
+    list_local_interfaces,
 )
 
 AGENT_VERSION = '6.0.2'
@@ -161,11 +163,21 @@ class AgentService:
         except Exception as e:
             self._log('ERR', 'signal', f'stop failed: {e}')
 
+    @staticmethod
+    def _child_close_fds():
+        """Close all fds > 2 in child before exec to prevent fd leaks."""
+        import resource
+        soft, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+        os.closerange(3, soft)
+
     def _popen(self, args, **kw):
         if IS_WIN:
             kw.setdefault('creationflags', 0)
             kw['creationflags'] = CREATE_NO_WINDOW
             kw.setdefault('startupinfo', win_hidden_startupinfo())
+        else:
+            kw.setdefault('preexec_fn', self._child_close_fds)
+        kw.setdefault('close_fds', True)
         return subprocess.Popen(args, **kw)
 
     def _safe_open_log(self, path_str: str):
@@ -205,38 +217,66 @@ class AgentService:
             return None
 
     # ------------------------------------------------------------------ #
-    # Server process management
+    # Server process management (--one-off with auto-restart)
     # ------------------------------------------------------------------ #
 
-    def _start_server_port(self, port: int, bind_ip: str = None):
-        args = [self.iperf3_bin, '-s', '-p', str(port)]
-        if bind_ip:
-            args += ['-B', str(bind_ip)]
-        log = os.path.join(self.LOG_DIR, f'server_{port}_{self._now_ts()}.log')
-        lf = self._safe_open_log(log)
-        proc = self._popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    class _ServerWrapper:
+        """Wraps an iperf3 --one-off server in an auto-restart loop.
 
-        def _srv_reader():
-            try:
-                for line in proc.stdout:
-                    try:
-                        lf.write(line)
-                    except Exception:
-                        pass
-            finally:
+        Presents the same .poll()/.terminate()/.kill()/.wait() interface as
+        subprocess.Popen so existing code that tracks SERVER_PROCS works
+        unchanged.
+        """
+
+        def __init__(self):
+            self._proc: subprocess.Popen | None = None
+            self._stop = threading.Event()
+            self._thread: threading.Thread | None = None
+
+        def poll(self):
+            if self._stop.is_set():
+                return -1
+            return None
+
+        def terminate(self):
+            self._stop.set()
+            p = self._proc
+            if p:
                 try:
-                    lf.flush()
-                    lf.close()
-                except Exception:
-                    pass
+                    p.terminate()
+                    p.wait(timeout=2)
+                except (subprocess.TimeoutExpired, OSError):
+                    try:
+                        p.kill()
+                    except OSError:
+                        pass
 
-        threading.Thread(target=_srv_reader, daemon=True).start()
+        def kill(self):
+            self.terminate()
+
+        def wait(self, timeout=None):
+            if self._thread:
+                self._thread.join(timeout=timeout)
+
+    def _start_server_port(self, port: int, bind_ip: str = None):
+        log = os.path.join(self.LOG_DIR, f'server_{port}_{self._now_ts()}.log')
+        cmd = [self.iperf3_bin, '-s', '-p', str(int(port))]
+        if bind_ip:
+            cmd += ['-B', str(bind_ip)]
+
+        lf = open(log, 'ab')
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=lf,
+            stderr=subprocess.STDOUT,
+            close_fds=True,
+            start_new_session=True,
+            preexec_fn=self._child_close_fds,
+        )
+        lf.close()
         time.sleep(0.15)
         if proc.poll() is not None:
-            try:
-                lf.write(f'[ERROR] server exited immediately (exit={proc.returncode})\n')
-            except Exception:
-                pass
             raise RuntimeError('iperf3 server exited immediately')
         return proc, log
 
@@ -366,9 +406,16 @@ class AgentService:
             raise ValueError("'target' required")
         if 'port' not in task:
             raise ValueError("'port' required")
+        # Validate target is a sane hostname/IP (prevent SSRF / shell injection)
+        target = str(task['target']).strip()
+        if not re.match(r'^[a-zA-Z0-9._:-]+$', target) or '..' in target:
+            raise ValueError(f'invalid target: {target!r}')
+        task['target'] = target
         with self.LOCK:
-            dead = [k for k, info in self.CLIENT_PROCS.items() if info['proc'].poll() is not None]
-            for k in dead:
+            now = time.time()
+            stale = [k for k, info in self.CLIENT_PROCS.items()
+                     if info.get('finished_ts') and now - info['finished_ts'] > 30]
+            for k in stale:
                 self.CLIENT_PROCS.pop(k, None)
             if len(self.CLIENT_PROCS) >= self.MAX_CLIENTS:
                 raise ValueError(f'max_clients({self.MAX_CLIENTS}) reached')
@@ -416,8 +463,19 @@ class AgentService:
         if task.get('bind'):
             args += ['-B', str(task['bind'])]
         if task.get('extra_args'):
+            allowed = {
+                '--tos', '--dscp', '--dont-fragment', '--no-delay',
+                '--set-mss', '--congestion', '--logfile',
+                '-4', '-6', '--get-server-output', '--repeating-payload',
+            }
             try:
-                args += [str(x) for x in task['extra_args']]
+                for x in task['extra_args']:
+                    arg = str(x).strip()
+                    flag = arg.split('=')[0] if '=' in arg else arg
+                    if flag in allowed or (flag.startswith('--') and flag in allowed):
+                        args.append(arg)
+                    else:
+                        self._log('WARN', 'client', f'extra_args: blocked {arg!r}')
             except Exception as e:
                 self._log('WARN', 'client', f'extra_args parse error: {e}')
 
@@ -555,7 +613,7 @@ class AgentService:
                     info = self.CLIENT_PROCS.get(key)
                     if info is not None:
                         info['exit_code'] = code
-                    self.CLIENT_PROCS.pop(key, None)
+                        info['finished_ts'] = time.time()
 
         with self.LOCK:
             self.CLIENT_PROCS[key] = {
@@ -588,6 +646,10 @@ class AgentService:
             ip_list = list_local_ipv4(exclude_loopback=True)
         except Exception:
             ip_list = [base_ip]
+        try:
+            ifaces = list_local_interfaces(exclude_loopback=True)
+        except Exception:
+            ifaces = [{'iface': ip, 'ip': ip} for ip in ip_list]
         while not self.stop_flag:
             try:
                 data, addr = sock.recvfrom(2048)
@@ -609,6 +671,7 @@ class AgentService:
                     'version': AGENT_VERSION,
                     'mgmt': base_ip,
                     'ips': ip_list,
+                    'interfaces': ifaces,
                     'non_mgmt_ips': [ip for ip in ip_list if ip != base_ip],
                 }
                 try:
@@ -645,7 +708,19 @@ class AgentService:
                 self.end_headers()
                 self.wfile.write(data)
 
+            def _check_auth(self) -> bool:
+                """Return True if authenticated (or no token configured)."""
+                if not outer.api_token:
+                    return True
+                req_token = (self.headers.get('X-API-Key') or '').strip()
+                if hmac.compare_digest(req_token, outer.api_token):
+                    return True
+                self._json(403, {'error': 'forbidden'})
+                return False
+
             def do_GET(self):
+                if not self._check_auth():
+                    return
                 p = urlparse(self.path)
                 if p.path == '/status':
                     with outer.LOCK:
@@ -671,6 +746,7 @@ class AgentService:
                         'log_dir_ok': outer._log_dir_ok,
                         'mgmt': outer._advertise_ip(),
                         'ips': list_local_ipv4(True),
+                        'interfaces': list_local_interfaces(True),
                     })
                     return
                 if p.path == '/metrics':
@@ -689,11 +765,8 @@ class AgentService:
 
             def do_POST(self):
                 try:
-                    if outer.api_token:
-                        req_token = (self.headers.get('X-API-Key') or '').strip()
-                        if req_token != outer.api_token:
-                            self._json(403, {'error': 'forbidden'})
-                            return
+                    if not self._check_auth():
+                        return
                     p = urlparse(self.path)
                     ln = int(self.headers.get('Content-Length', '0'))
                     if ln > 64 * 1024:

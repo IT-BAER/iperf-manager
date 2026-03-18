@@ -234,7 +234,7 @@ cat >> "$SERVICE_FILE" <<TAILEOF
 # Hardening
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=${CONFIG_DIR} ${LOG_DIR} ${INSTALL_DIR}/data
+ReadWritePaths=${CONFIG_DIR} ${LOG_DIR} ${INSTALL_DIR}/data /tmp
 ProtectHome=true
 
 [Install]

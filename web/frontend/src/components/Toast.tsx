@@ -4,6 +4,7 @@ interface ToastItem {
   id: number
   msg: string
   type: 'info' | 'ok' | 'err'
+  exiting?: boolean
 }
 
 let _id = 0
@@ -12,7 +13,11 @@ export function Toast() {
   const [items, setItems] = useState<ToastItem[]>([])
 
   const dismiss = useCallback((id: number) => {
-    setItems(prev => prev.filter(t => t.id !== id))
+    // trigger exit animation first
+    setItems(prev => prev.map(t => t.id === id ? { ...t, exiting: true } : t))
+    setTimeout(() => {
+      setItems(prev => prev.filter(t => t.id !== id))
+    }, 180)
   }, [])
 
   useEffect(() => {
@@ -34,6 +39,7 @@ export function Toast() {
         <div
           key={item.id}
           className={`pointer-events-auto px-4 py-2.5 rounded-sm border text-[13px] shadow-lg flex items-start gap-2
+            ${item.exiting ? 'animate-toast-out' : 'animate-toast-in'}
             ${item.type === 'err'
               ? 'bg-surface border-err text-err'
               : item.type === 'ok'
@@ -44,9 +50,9 @@ export function Toast() {
           <span className="flex-1">{item.msg}</span>
           <button
             onClick={() => dismiss(item.id)}
-            className="text-fg-4 hover:text-fg-2 text-xs shrink-0"
+            className="text-fg-4 hover:text-fg-2 shrink-0 active:scale-90 transition-transform"
             aria-label="Dismiss"
-          >✕</button>
+          ><i className="fa-solid fa-xmark text-[11px]" /></button>
         </div>
       ))}
     </div>

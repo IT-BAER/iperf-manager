@@ -28,11 +28,11 @@ interface LiveResultsProps {
   metricsHistory: MetricPoint[]
 }
 
-function formatBps(bps: number): string {
-  if (bps >= 1e9) return `${(bps / 1e9).toFixed(2)} Gbps`
-  if (bps >= 1e6) return `${(bps / 1e6).toFixed(1)} Mbps`
-  if (bps >= 1e3) return `${(bps / 1e3).toFixed(0)} Kbps`
-  return `${bps.toFixed(0)} bps`
+function formatBps(mbps: number): string {
+  if (mbps >= 1000) return `${(mbps / 1000).toFixed(2)} Gbps`
+  if (mbps >= 1) return `${mbps.toFixed(1)} Mbps`
+  if (mbps >= 0.001) return `${(mbps * 1000).toFixed(0)} Kbps`
+  return `${mbps.toFixed(0)} Mbps`
 }
 
 function formatElapsed(ms: number): string {
@@ -113,15 +113,22 @@ function buildBarOptions(): ChartOptions<'bar'> {
 export default function LiveResults({ testState, metrics, metricsHistory }: LiveResultsProps) {
   const [open, setOpen] = useState(true)
   const [nowMs, setNowMs] = useState(Date.now())
+  const isRunning = testState.status === 'running'
 
   useEffect(() => {
+    if (!isRunning) return
     const t = setInterval(() => setNowMs(Date.now()), 500)
     return () => clearInterval(t)
-  }, [])
+  }, [isRunning])
 
   const duration = testState.config?.duration_sec ?? 0
   const startedMs = testState.started_at ? testState.started_at * 1000 : nowMs
-  const elapsedMs = Math.max(0, nowMs - startedMs)
+  const finishedMs = testState.finished_at ? testState.finished_at * 1000 : null
+  const elapsedMs = isRunning
+    ? Math.max(0, nowMs - startedMs)
+    : finishedMs
+      ? Math.max(0, finishedMs - startedMs)
+      : 0
   const progress = duration > 0 ? Math.min(100, (elapsedMs / 1000 / duration) * 100) : 0
 
   const totalUp = metrics?.total_up ?? 0
@@ -137,7 +144,7 @@ export default function LiveResults({ testState, metrics, metricsHistory }: Live
     datasets: [
       {
         label: 'Upload',
-        data: metricsHistory.map(p => p.up / 1e6),
+        data: metricsHistory.map(p => p.up),
         borderColor: CHART_COLORS.ok,
         backgroundColor: CHART_COLORS.okFill,
         borderWidth: 1.5,
@@ -147,7 +154,7 @@ export default function LiveResults({ testState, metrics, metricsHistory }: Live
       },
       {
         label: 'Download',
-        data: metricsHistory.map(p => p.dn / 1e6),
+        data: metricsHistory.map(p => p.dn),
         borderColor: CHART_COLORS.accent,
         backgroundColor: CHART_COLORS.accentFill,
         borderWidth: 1.5,
@@ -165,14 +172,14 @@ export default function LiveResults({ testState, metrics, metricsHistory }: Live
     datasets: [
       {
         label: 'Upload',
-        data: agentIds.map(id => (metrics?.clients[id]?.up ?? 0) / 1e6),
+        data: agentIds.map(id => metrics?.clients[id]?.up ?? 0),
         backgroundColor: 'rgba(62,201,106,0.7)',
         borderColor: CHART_COLORS.ok,
         borderWidth: 1,
       },
       {
         label: 'Download',
-        data: agentIds.map(id => (metrics?.clients[id]?.dn ?? 0) / 1e6),
+        data: agentIds.map(id => metrics?.clients[id]?.dn ?? 0),
         backgroundColor: 'rgba(75,141,248,0.7)',
         borderColor: CHART_COLORS.accent,
         borderWidth: 1,
@@ -194,13 +201,12 @@ export default function LiveResults({ testState, metrics, metricsHistory }: Live
           <span className={`w-2 h-2 rounded-full ${testState.status === 'running' ? 'bg-ok' : 'bg-warn'}`} />
           <span className="text-[12px] text-fg-3 capitalize">{testState.status}</span>
         </div>
-        <span className={`text-fg-3 text-lg leading-none transition-transform duration-150 ${open ? '' : '-rotate-90'}`}>
-          ▾
-        </span>
+        <i className={`fa-solid fa-chevron-down text-fg-3 text-[11px] transition-transform duration-150 ${open ? '' : '-rotate-90'}`} />
       </div>
 
-      {open && (
-        <div className="p-4 flex flex-col gap-4">
+      <div className={`collapsible-grid ${open ? 'open' : 'closed'}`}>
+        <div className="collapsible-inner">
+          <div className="p-4 flex flex-col gap-4">
           {/* Progress */}
           {duration > 0 && (
             <div className="flex items-center gap-3">
@@ -260,7 +266,8 @@ export default function LiveResults({ testState, metrics, metricsHistory }: Live
             </div>
           </div>
         </div>
-      )}
+        </div>
+      </div>
     </div>
   )
 }

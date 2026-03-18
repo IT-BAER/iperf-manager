@@ -7,7 +7,7 @@ Keep-Alive 연결 재사용을 통한 폴링 효율 개선 포함.
 import json
 import os
 import urllib.request
-from http.client import HTTPConnection
+from http.client import HTTPConnection, CannotSendRequest, ResponseNotReady
 from urllib.parse import urlparse
 import threading
 
@@ -103,7 +103,7 @@ def http_post_json(base, path, payload, timeout=6, api_key=None):
         if 200 <= resp.status < 300:
             return json.loads(body.decode('utf-8', 'replace'))
         raise RuntimeError(f'HTTP {resp.status}: {body.decode("utf-8","replace")[:200]}')
-    except (ConnectionError, OSError, RuntimeError):
+    except (ConnectionError, OSError, RuntimeError, CannotSendRequest, ResponseNotReady):
         # 연결 끊김 → 풀에서 제거 후 새 연결로 재시도
         _pool.remove(host, port)
         try:
@@ -142,7 +142,7 @@ def http_get_json(base, path, timeout=1.5, api_key=None):
         if 200 <= resp.status < 300:
             return json.loads(body.decode('utf-8', 'replace'))
         return None
-    except (ConnectionError, OSError):
+    except (ConnectionError, OSError, CannotSendRequest, ResponseNotReady):
         _pool.remove(host, port)
         try:
             conn = _pool.get(host, port, timeout)

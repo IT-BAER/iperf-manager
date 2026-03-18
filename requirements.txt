@@ -1,4 +1,7 @@
-PySide6>=6.5
-pyqtgraph>=0.13.3
-numpy>=1.24
+# Agent: zero dependencies (stdlib only)
+# Web dashboard:
+flask>=3.0
+flask-socketio>=5.3
+eventlet>=0.35
+# Report generation (optional):
 matplotlib>=3.5

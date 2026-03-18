@@ -193,8 +193,8 @@ Expected response:
 
 ```
  ┌─────────────────────────────────────┐
- │         Dashboard / Web UI          │
- │    (main_dashboard.py / main_web.py)│
+ │         Web Dashboard                │
+ │           (main_web.py)             │
  └──────────┬──────────────────┬───────┘
             │ :9001/tcp REST   │ :9999/udp
             │ API calls        │ discovery
