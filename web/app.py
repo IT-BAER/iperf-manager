@@ -5,7 +5,9 @@ Reuses *only* the existing core/ modules (zero modifications).
 """
 from __future__ import annotations
 
+import csv
 import hashlib
+import io
 import json
 import os
 import socket
@@ -218,9 +220,21 @@ def _run_test_thread(config: dict):
 # ║  Routes – Pages                                                     ║
 # ╚══════════════════════════════════════════════════════════════════════╝
 
+# Serve React frontend (built) if available, fall back to legacy template
+_FRONTEND_DIST = Path(__file__).resolve().parent / "frontend" / "dist"
+
+
 @app.route("/")
 def index():
+    if (_FRONTEND_DIST / "index.html").is_file():
+        return send_from_directory(str(_FRONTEND_DIST), "index.html")
     return render_template("dashboard.html", version=DASHBOARD_VERSION)
+
+
+@app.route("/assets/<path:filename>")
+def serve_assets(filename):
+    """Serve Vite-built frontend assets."""
+    return send_from_directory(str(_FRONTEND_DIST / "assets"), filename)
 
 
 # ╔══════════════════════════════════════════════════════════════════════╗
@@ -382,6 +396,23 @@ def list_reports():
                 "modified": f.stat().st_mtime,
             })
     return jsonify(files)
+
+
+@app.route("/api/reports/<path:filename>/data", methods=["GET"])
+def report_data(filename):
+    """Return CSV file contents as parsed JSON for inline viewing."""
+    safe = Path(filename).name
+    target = DATA_DIR / safe
+    if not target.is_file():
+        abort(404)
+    rows = []
+    columns = []
+    with open(target, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        columns = reader.fieldnames or []
+        for row in reader:
+            rows.append(dict(row))
+    return jsonify({"filename": safe, "columns": columns, "rows": rows})
 
 
 @app.route("/api/reports/<path:filename>", methods=["GET"])
