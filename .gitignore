@@ -38,6 +38,10 @@ data/last_profile.json
 # Claude Code local config
 .claude/
 
+# Frontend build
+web/frontend/node_modules/
+web/frontend/dist/
+
 # Temp files
 _tmp_*.json
 *.tmp
