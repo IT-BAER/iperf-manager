@@ -3,149 +3,209 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>iperf-manager Dashboard</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>">
+    <title>iperf-manager · Network Performance</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <script src="https://unpkg.com/lucide@0.344.0/dist/umd/lucide.min.js"></script>
 </head>
 <body>
 
-<!-- ═══ Header ═══════════════════════════════════════════════════ -->
+<!-- ═══ Toast Container ═══════════════════════════════════════════════ -->
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- ═══ Header ═════════════════════════════════════════════════════════ -->
 <header class="header">
-    <div class="header__brand">
-        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
-        iperf-manager
-        <span class="text-dim text-sm">v{{ version }}</span>
+    <div class="header__left">
+        <div class="header__brand">
+            <div class="brand-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+            </div>
+            <span>iperf-manager</span>
+            <span class="version-badge">v{{ version }}</span>
+        </div>
+    </div>
+    <div class="header__center">
+        <div class="profile-row">
+            <select id="profileSelect" style="width:160px">
+                <option value="">Select profile…</option>
+            </select>
+            <button class="btn-icon" onclick="loadSelectedProfile()" title="Load profile"><i data-lucide="download"></i></button>
+            <button class="btn-icon" onclick="promptSaveProfile()" title="Save profile"><i data-lucide="save"></i></button>
+            <button class="btn-icon" onclick="deleteSelectedProfile()" title="Delete profile"><i data-lucide="trash-2"></i></button>
+        </div>
     </div>
     <div class="header__right">
-        <!-- Profile controls -->
-        <select id="profileSelect" title="Load profile">
-            <option value="">— Profiles —</option>
-        </select>
-        <button class="btn btn--sm" onclick="loadSelectedProfile()" title="Load">Load</button>
-        <button class="btn btn--sm" onclick="promptSaveProfile()" title="Save current config">Save</button>
-        <button class="btn btn--sm" onclick="deleteSelectedProfile()" title="Delete">Del</button>
-
-        <div class="conn-indicator">
-            <div class="conn-dot" id="connDot"></div>
-            <span id="connLabel">Disconnected</span>
+        <div class="ws-status" id="wsStatus">
+            <div class="ws-dot" id="wsDot"></div>
+            <span id="wsLabel">Connecting…</span>
         </div>
     </div>
 </header>
 
-<!-- ═══ Dashboard Grid ═══════════════════════════════════════════ -->
-<div class="dashboard">
+<!-- ═══ App Layout ════════════════════════════════════════════════════ -->
+<div class="app-layout">
 
-    <!-- ─── Sidebar ──────────────────────────────────────────── -->
+    <!-- ─── Sidebar ──────────────────────────────────────────────── -->
     <aside class="sidebar">
         <!-- Agents -->
-        <div class="sidebar__section">
-            <div class="sidebar__title">
-                Agents
-                <span>
-                    <button class="btn btn--sm" onclick="discoverAgents()" title="UDP broadcast discover">Discover</button>
-                    <button class="btn btn--sm" onclick="showAddAgentModal()" title="Add agent manually">+ Add</button>
-                </span>
+        <div class="sidebar-section">
+            <div class="section-header">
+                <div class="section-title"><i data-lucide="server"></i> Agents</div>
+                <div class="section-actions">
+                    <button class="btn-icon" onclick="discoverAgents()" title="Auto-discover agents"><i data-lucide="radar"></i></button>
+                    <button class="btn-icon" onclick="showAddAgentModal()" title="Add agent manually"><i data-lucide="plus"></i></button>
+                </div>
             </div>
             <ul class="agent-list" id="agentList">
-                <li class="agent-empty" id="agentEmpty">No agents — click Discover or Add</li>
+                <li class="empty-state" id="agentEmpty">
+                    <i data-lucide="wifi-off"></i>
+                    <p>No agents connected</p>
+                    <span>Click Discover or + to get started</span>
+                </li>
             </ul>
         </div>
 
         <!-- Reports -->
-        <div class="sidebar__section">
-            <div class="sidebar__title">
-                Reports &amp; Files
-                <button class="btn btn--sm" onclick="refreshReports()">↻</button>
+        <div class="sidebar-section">
+            <div class="section-header">
+                <div class="section-title"><i data-lucide="file-text"></i> Reports</div>
+                <button class="btn-icon" onclick="refreshReports()" title="Refresh reports"><i data-lucide="refresh-cw"></i></button>
             </div>
-            <ul class="reports-list" id="reportsList">
-                <li class="text-dim text-sm">No files yet</li>
+            <ul class="report-list" id="reportsList">
+                <li class="empty-state-sm">No reports yet</li>
             </ul>
         </div>
     </aside>
 
-    <!-- ─── Main Area ────────────────────────────────────────── -->
-    <main class="main-area">
+    <!-- ─── Main Content ─────────────────────────────────────────── -->
+    <main class="main-content">
 
-        <!-- Test Config Card -->
-        <div class="card">
-            <div class="card__head">
-                Test Configuration
-                <div class="flex items-center gap-sm">
-                    <span class="test-status-badge idle" id="testBadge">● Idle</span>
+        <!-- Overview Stats -->
+        <div class="stats-overview">
+            <div class="stat-card">
+                <div class="stat-card__icon blue"><i data-lucide="server"></i></div>
+                <div class="stat-card__content">
+                    <div class="stat-card__value" id="totalAgents">0</div>
+                    <div class="stat-card__label">Total Agents</div>
                 </div>
             </div>
-            <div class="card__body">
-                <!-- Server row -->
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="serverAgent">Server Agent</label>
-                        <select id="serverAgent"><option value="">— Select agent —</option></select>
-                    </div>
-                    <div class="form-group">
-                        <label for="serverBind">Server Bind IP</label>
-                        <input id="serverBind" placeholder="e.g. 192.168.1.100">
-                    </div>
-                    <div class="form-group">
-                        <label for="apiKey">API Key</label>
-                        <input id="apiKey" type="password" placeholder="optional">
+            <div class="stat-card">
+                <div class="stat-card__icon green"><i data-lucide="check-circle"></i></div>
+                <div class="stat-card__content">
+                    <div class="stat-card__value" id="onlineAgents">0</div>
+                    <div class="stat-card__label">Online</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-card__icon purple"><i data-lucide="activity"></i></div>
+                <div class="stat-card__content">
+                    <div class="stat-card__value" id="testCount">0</div>
+                    <div class="stat-card__label">Tests Run</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-card__icon amber"><i data-lucide="gauge"></i></div>
+                <div class="stat-card__content">
+                    <div class="stat-card__value" id="testStatusCard">Idle</div>
+                    <div class="stat-card__label">Status</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Test Configuration Card -->
+        <div class="card" id="testConfigCard">
+            <div class="card-header collapsible" onclick="toggleSection('testConfig')">
+                <div class="card-title"><i data-lucide="settings"></i> Test Configuration</div>
+                <div class="card-header__right">
+                    <span class="status-pill status-pill--idle" id="testBadge">● Idle</span>
+                    <i data-lucide="chevron-down" class="collapse-icon" id="testConfigIcon"></i>
+                </div>
+            </div>
+            <div class="card-body" id="testConfigBody">
+
+                <!-- Server Section -->
+                <div class="form-section">
+                    <div class="form-section-title"><i data-lucide="hard-drive"></i> Server</div>
+                    <div class="form-row">
+                        <div class="form-group" style="grid-column: span 2">
+                            <label for="serverAgent">Server Agent</label>
+                            <select id="serverAgent"><option value="">— Select agent —</option></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="serverBind">Bind IP</label>
+                            <input id="serverBind" placeholder="e.g. 192.168.1.100">
+                        </div>
+                        <div class="form-group">
+                            <label for="apiKey">API Key</label>
+                            <input id="apiKey" type="password" placeholder="optional">
+                        </div>
                     </div>
                 </div>
 
-                <!-- Test parameters -->
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="duration">Duration (s)</label>
-                        <input id="duration" type="number" value="30" min="1">
-                    </div>
-                    <div class="form-group">
-                        <label for="basePort">Base Port</label>
-                        <input id="basePort" type="number" value="5211" min="1024">
-                    </div>
-                    <div class="form-group">
-                        <label for="pollInterval">Poll Interval (s)</label>
-                        <input id="pollInterval" type="number" value="1.0" min="0.2" step="0.1">
-                    </div>
-                    <div class="form-group">
-                        <label for="proto">Protocol</label>
-                        <select id="proto">
-                            <option value="tcp">TCP</option>
-                            <option value="udp">UDP</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="parallel">Parallel (-P)</label>
-                        <input id="parallel" type="number" value="1" min="1">
-                    </div>
-                    <div class="form-group">
-                        <label for="omit">Omit (-O)</label>
-                        <input id="omit" type="number" value="1" min="0">
+                <!-- Test Parameters -->
+                <div class="form-section">
+                    <div class="form-section-title"><i data-lucide="sliders-horizontal"></i> Parameters</div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="duration">Duration (s)</label>
+                            <input id="duration" type="number" value="30" min="1">
+                        </div>
+                        <div class="form-group">
+                            <label for="basePort">Base Port</label>
+                            <input id="basePort" type="number" value="5211" min="1024">
+                        </div>
+                        <div class="form-group">
+                            <label for="pollInterval">Poll Interval (s)</label>
+                            <input id="pollInterval" type="number" value="1.0" min="0.2" step="0.1">
+                        </div>
+                        <div class="form-group">
+                            <label for="proto">Protocol</label>
+                            <select id="proto">
+                                <option value="tcp">TCP</option>
+                                <option value="udp">UDP</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="parallel">Parallel (-P)</label>
+                            <input id="parallel" type="number" value="1" min="1">
+                        </div>
+                        <div class="form-group">
+                            <label for="omit">Omit (-O)</label>
+                            <input id="omit" type="number" value="1" min="0">
+                        </div>
                     </div>
                 </div>
 
                 <!-- Advanced -->
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="bitrate">Bitrate (-b)</label>
-                        <input id="bitrate" placeholder="e.g. 100M">
-                    </div>
-                    <div class="form-group">
-                        <label for="tcpWindow">Window (-w)</label>
-                        <input id="tcpWindow" placeholder="e.g. 128K">
+                <div class="form-section">
+                    <div class="form-section-title"><i data-lucide="wrench"></i> Advanced</div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="bitrate">Bitrate (-b)</label>
+                            <input id="bitrate" placeholder="e.g. 100M">
+                        </div>
+                        <div class="form-group">
+                            <label for="tcpWindow">Window (-w)</label>
+                            <input id="tcpWindow" placeholder="e.g. 128K">
+                        </div>
                     </div>
                 </div>
 
                 <!-- Test Mode -->
-                <div class="form-group mb-1">
-                    <label>Test Mode</label>
+                <div class="form-section">
+                    <div class="form-section-title"><i data-lucide="shuffle"></i> Test Mode</div>
                     <div class="mode-group">
                         <input type="radio" name="mode" id="mode_bidir" value="bidir" checked>
                         <label for="mode_bidir">Bidir</label>
                         <input type="radio" name="mode" id="mode_up" value="up_only">
-                        <label for="mode_up">Up Only</label>
+                        <label for="mode_up">Upload</label>
                         <input type="radio" name="mode" id="mode_dn" value="down_only">
-                        <label for="mode_dn">Down Only</label>
+                        <label for="mode_dn">Download</label>
                         <input type="radio" name="mode" id="mode_dual" value="dual">
                         <label for="mode_dual">Dual</label>
                         <input type="radio" name="mode" id="mode_2p" value="two_phase">
@@ -154,14 +214,14 @@
                 </div>
 
                 <!-- Clients Table -->
-                <div class="flex justify-between items-center mb-1">
-                    <label style="margin:0">Clients</label>
-                    <button class="btn btn--sm btn--success" onclick="addClientRow()">+ Add Client</button>
-                </div>
-                <div style="overflow-x:auto">
-                    <table class="clients-table" id="clientsTable">
-                        <thead>
-                            <tr>
+                <div class="form-section">
+                    <div class="flex justify-between items-center mb-1">
+                        <div class="form-section-title" style="margin-bottom:0"><i data-lucide="users"></i> Clients</div>
+                        <button class="btn btn--sm btn--primary" onclick="addClientRow()"><i data-lucide="plus"></i> Add Client</button>
+                    </div>
+                    <div style="overflow-x:auto; margin-top:.5rem">
+                        <table class="data-table" id="clientsTable">
+                            <thead><tr>
                                 <th>Name</th>
                                 <th>Agent</th>
                                 <th>Target IP</th>
@@ -169,133 +229,206 @@
                                 <th>Parallel</th>
                                 <th>Bidir</th>
                                 <th></th>
-                            </tr>
-                        </thead>
-                        <tbody id="clientsBody"></tbody>
-                    </table>
+                            </tr></thead>
+                            <tbody id="clientsBody"></tbody>
+                        </table>
+                    </div>
                 </div>
 
-                <!-- Controls -->
+                <!-- Start / Stop -->
                 <div class="test-controls">
-                    <button class="btn btn--success" id="btnStart" onclick="startTest()">▶ Start Test</button>
-                    <button class="btn btn--danger hidden" id="btnStop" onclick="stopTest()">■ Stop Test</button>
+                    <button class="btn btn--success" id="btnStart" onclick="startTest()">
+                        <i data-lucide="play"></i> Start Test
+                    </button>
+                    <button class="btn btn--danger hidden" id="btnStop" onclick="stopTest()">
+                        <i data-lucide="square"></i> Stop Test
+                    </button>
                 </div>
             </div>
         </div>
 
-        <!-- Live Stats Bar -->
-        <div class="stats-bar hidden" id="statsBar">
-            <div class="stat-item">
-                <div class="stat-label">Upload</div>
-                <div class="stat-value up" id="statUp">0.0</div>
-                <div class="stat-label">Mbps</div>
+        <!-- Live Metrics -->
+        <div class="live-metrics hidden" id="liveMetrics">
+            <div class="metric-card upload">
+                <div class="metric-icon"><i data-lucide="arrow-up"></i></div>
+                <div class="metric-data">
+                    <div class="metric-value" id="statUp">0.0</div>
+                    <div class="metric-unit">Mbps</div>
+                </div>
             </div>
-            <div class="stat-item">
-                <div class="stat-label">Download</div>
-                <div class="stat-value dn" id="statDn">0.0</div>
-                <div class="stat-label">Mbps</div>
+            <div class="metric-card download">
+                <div class="metric-icon"><i data-lucide="arrow-down"></i></div>
+                <div class="metric-data">
+                    <div class="metric-value" id="statDn">0.0</div>
+                    <div class="metric-unit">Mbps</div>
+                </div>
             </div>
-            <div class="stat-item">
-                <div class="stat-label">Total</div>
-                <div class="stat-value" id="statTotal">0.0</div>
-                <div class="stat-label">Mbps</div>
+            <div class="metric-card total">
+                <div class="metric-icon"><i data-lucide="bar-chart-3"></i></div>
+                <div class="metric-data">
+                    <div class="metric-value" id="statTotal">0.0</div>
+                    <div class="metric-unit">Mbps</div>
+                </div>
             </div>
-            <div class="stat-item">
-                <div class="stat-label">Elapsed</div>
-                <div class="stat-value" id="statElapsed" style="font-size:1.1rem">0s</div>
-                <div class="stat-label">&nbsp;</div>
+            <div class="metric-card elapsed">
+                <div class="metric-icon"><i data-lucide="clock"></i></div>
+                <div class="metric-data">
+                    <div class="metric-value" id="statElapsed">0s</div>
+                    <div class="metric-unit">Elapsed</div>
+                </div>
             </div>
+        </div>
+
+        <!-- Progress Bar -->
+        <div class="progress-wrap hidden" id="progressWrap">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <span class="progress-text" id="progressText">0%</span>
         </div>
 
         <!-- Charts -->
         <div class="charts-grid hidden" id="chartsPanel">
-            <div class="chart-wrap">
-                <div class="chart-title">Total Throughput</div>
-                <canvas id="chartTotal"></canvas>
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title"><i data-lucide="trending-up"></i> Total Throughput</div>
+                </div>
+                <div class="card-body chart-body">
+                    <canvas id="chartTotal"></canvas>
+                </div>
             </div>
-            <div class="chart-wrap">
-                <div class="chart-title">Per-Client Throughput</div>
-                <canvas id="chartClients"></canvas>
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title"><i data-lucide="git-branch"></i> Per-Client Throughput</div>
+                </div>
+                <div class="card-body chart-body">
+                    <canvas id="chartClients"></canvas>
+                </div>
             </div>
         </div>
 
-        <!-- Log Panel -->
+        <!-- Test Log -->
         <div class="card">
-            <div class="card__head">
-                Test Log
-                <button class="btn btn--sm" onclick="clearLog()">Clear</button>
+            <div class="card-header">
+                <div class="card-title"><i data-lucide="terminal"></i> Test Log</div>
+                <button class="btn-text" onclick="clearLog()"><i data-lucide="trash"></i> Clear</button>
             </div>
-            <div class="card__body">
-                <div class="log-output" id="logOutput">Ready.\n</div>
+            <div class="card-body">
+                <div class="log-output" id="logOutput"></div>
             </div>
         </div>
 
     </main>
 </div>
 
-<!-- ═══ Add Agent Modal ══════════════════════════════════════════ -->
+<!-- ═══ Add Agent Modal ═══════════════════════════════════════════════ -->
 <div class="modal-overlay" id="addAgentModal">
     <div class="modal">
-        <h3>Add Agent</h3>
-        <div class="form-group">
-            <label for="agentUrl">Agent URL</label>
-            <input id="agentUrl" placeholder="http://192.168.1.10:9001">
+        <div class="modal-header">
+            <h3>Add Agent</h3>
+            <p>Connect to an iperf-manager agent manually.</p>
         </div>
-        <div class="form-group">
-            <label for="agentName">Name (optional)</label>
-            <input id="agentName" placeholder="e.g. Host-A">
+        <div class="modal-body">
+            <div class="form-group">
+                <label for="agentUrl">Agent URL</label>
+                <input id="agentUrl" placeholder="http://192.168.1.10:9001">
+            </div>
+            <div class="form-group">
+                <label for="agentName">Display Name</label>
+                <input id="agentName" placeholder="e.g. pve01">
+            </div>
+            <div class="form-group">
+                <label for="agentApiKey">API Key (optional)</label>
+                <input id="agentApiKey" type="password" placeholder="">
+            </div>
         </div>
-        <div class="form-group">
-            <label for="agentApiKey">API Key (optional)</label>
-            <input id="agentApiKey" type="password" placeholder="">
-        </div>
-        <div class="modal__actions">
+        <div class="modal-footer">
             <button class="btn" onclick="hideAddAgentModal()">Cancel</button>
-            <button class="btn btn--primary" onclick="addAgent()">Add</button>
+            <button class="btn btn--primary" onclick="addAgent()"><i data-lucide="plus"></i> Add Agent</button>
         </div>
     </div>
 </div>
 
-<!-- ═══ Save Profile Modal ═══════════════════════════════════════ -->
+<!-- ═══ Save Profile Modal ════════════════════════════════════════════ -->
 <div class="modal-overlay" id="saveProfileModal">
     <div class="modal">
-        <h3>Save Profile</h3>
-        <div class="form-group">
-            <label for="profileName">Profile Name</label>
-            <input id="profileName" placeholder="my-test-profile">
+        <div class="modal-header">
+            <h3>Save Profile</h3>
+            <p>Save the current test configuration for later.</p>
         </div>
-        <div class="modal__actions">
+        <div class="modal-body">
+            <div class="form-group">
+                <label for="profileName">Profile Name</label>
+                <input id="profileName" placeholder="my-test-profile">
+            </div>
+        </div>
+        <div class="modal-footer">
             <button class="btn" onclick="hideSaveProfileModal()">Cancel</button>
-            <button class="btn btn--primary" onclick="saveProfile()">Save</button>
+            <button class="btn btn--primary" onclick="saveProfile()"><i data-lucide="save"></i> Save</button>
         </div>
     </div>
 </div>
 
-<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
 <script>
-// ── State ──────────────────────────────────────────────────────────
-const agents = {};          // {id: {id, url, name, status, ...}}
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// State
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const agents = {};
 let testRunning = false;
 let testStartTime = null;
+let testDuration = 30;
 let elapsedTimer = null;
+let testsRun = 0;
 
-// Chart instances
 let totalChart = null;
 let clientChart = null;
 const MAX_POINTS = 120;
 
-// ── Socket.IO ──────────────────────────────────────────────────────
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Toast Notification System
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function showToast(message, type = 'info', duration = 4000) {
+    const container = document.getElementById('toastContainer');
+    const icons = {
+        success: '<i data-lucide="check-circle"></i>',
+        error:   '<i data-lucide="alert-circle"></i>',
+        warning: '<i data-lucide="alert-triangle"></i>',
+        info:    '<i data-lucide="info"></i>',
+    };
+    const toast = document.createElement('div');
+    toast.className = `toast toast--${type}`;
+    toast.innerHTML = `
+        <div class="toast__icon">${icons[type] || icons.info}</div>
+        <div class="toast__content">
+            <div class="toast__message">${esc(message)}</div>
+        </div>
+        <button class="toast__close" onclick="this.closest('.toast').remove()">
+            <i data-lucide="x"></i>
+        </button>`;
+    container.appendChild(toast);
+    lucide.createIcons({ attrs: { 'stroke-width': 2 } });
+    setTimeout(() => {
+        toast.classList.add('exiting');
+        setTimeout(() => toast.remove(), 200);
+    }, duration);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Socket.IO
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 const socket = io({ transports: ['websocket', 'polling'] });
 
 socket.on('connect', () => {
-    document.getElementById('connDot').classList.add('connected');
-    document.getElementById('connLabel').textContent = 'Connected';
-    appendLog('[ws] Connected to server');
+    document.getElementById('wsDot').classList.add('connected');
+    document.getElementById('wsLabel').textContent = 'Connected';
+    appendLog('WebSocket connected', 'success');
 });
 
 socket.on('disconnect', () => {
-    document.getElementById('connDot').classList.remove('connected');
-    document.getElementById('connLabel').textContent = 'Disconnected';
+    document.getElementById('wsDot').classList.remove('connected');
+    document.getElementById('wsLabel').textContent = 'Disconnected';
+    appendLog('WebSocket disconnected', 'error');
 });
 
 socket.on('status', (data) => {
@@ -305,25 +438,31 @@ socket.on('status', (data) => {
 });
 
 socket.on('test_started', (data) => {
-    appendLog('[test] Started');
+    appendLog('Test started', 'info');
     setTestState('running');
     testStartTime = Date.now();
+    testDuration = data.config?.duration_sec || 30;
     initCharts();
 });
 
 socket.on('test_completed', (data) => {
-    appendLog('[test] Completed' + (data.error ? ' with error: ' + data.error : ''));
+    const msg = data.error ? `Test completed with error: ${data.error}` : 'Test completed successfully';
+    appendLog(msg, data.error ? 'error' : 'success');
     setTestState('idle');
+    testsRun++;
+    document.getElementById('testCount').textContent = testsRun;
     refreshReports();
+    showToast(data.error ? `Test failed: ${data.error}` : 'Test completed!', data.error ? 'error' : 'success');
 });
 
 socket.on('test_error', (data) => {
-    appendLog('[test] ERROR: ' + data.message, 'error');
+    appendLog('ERROR: ' + data.message, 'error');
+    showToast(data.message, 'error', 6000);
 });
 
 socket.on('test_log', (data) => {
-    const cls = data.message.includes('error') ? 'error' :
-                data.message.includes('OK') ? 'ok' : '';
+    const cls = data.message.includes('error') || data.message.includes('ERROR') ? 'error' :
+                data.message.includes('OK') || data.message.includes('✓') ? 'success' : '';
     appendLog(data.message, cls);
 });
 
@@ -337,67 +476,89 @@ socket.on('agents_update', (list) => {
     renderAgents();
 });
 
-
-// ── Charts ─────────────────────────────────────────────────────────
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Charts
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 const chartDefaults = {
     responsive: true,
     maintainAspectRatio: false,
-    animation: { duration: 0 },
+    animation: { duration: 200 },
+    interaction: { mode: 'index', intersect: false },
     scales: {
         x: {
             display: true,
-            ticks: { color: '#8892a4', maxTicksLimit: 10, font: { size: 10 } },
-            grid: { color: 'rgba(42,58,92,0.4)' },
+            ticks: { color: '#52525b', maxTicksLimit: 10, font: { size: 10, family: "'Inter', sans-serif" } },
+            grid: { color: 'rgba(39,39,42,.4)', drawBorder: false },
         },
         y: {
             display: true,
-            title: { display: true, text: 'Mbps', color: '#8892a4', font: { size: 11 } },
-            ticks: { color: '#8892a4', font: { size: 10 } },
-            grid: { color: 'rgba(42,58,92,0.4)' },
+            title: { display: true, text: 'Mbps', color: '#71717a', font: { size: 11, family: "'Inter', sans-serif" } },
+            ticks: { color: '#52525b', font: { size: 10, family: "'Inter', sans-serif" } },
+            grid: { color: 'rgba(39,39,42,.4)', drawBorder: false },
             beginAtZero: true,
         }
     },
     plugins: {
-        legend: { labels: { color: '#e0e0e0', font: { size: 11 } } }
+        legend: {
+            labels: { color: '#a1a1aa', font: { size: 11, family: "'Inter', sans-serif" }, usePointStyle: true, pointStyle: 'circle', padding: 16 }
+        },
+        tooltip: {
+            backgroundColor: '#27272a',
+            titleColor: '#fafafa',
+            bodyColor: '#d4d4d8',
+            borderColor: '#3f3f46',
+            borderWidth: 1,
+            cornerRadius: 8,
+            padding: 10,
+            titleFont: { family: "'Inter', sans-serif", weight: 600 },
+            bodyFont: { family: "'JetBrains Mono', monospace", size: 12 },
+            callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(1) ?? '—'} Mbps` }
+        }
     }
 };
 
 function initCharts() {
     document.getElementById('chartsPanel').classList.remove('hidden');
-    document.getElementById('statsBar').classList.remove('hidden');
+    document.getElementById('liveMetrics').classList.remove('hidden');
+    document.getElementById('progressWrap').classList.remove('hidden');
 
-    // Destroy old
     if (totalChart) totalChart.destroy();
     if (clientChart) clientChart.destroy();
+
+    const upGrad = document.getElementById('chartTotal').getContext('2d');
+    const gradUp = upGrad.createLinearGradient(0, 0, 0, 260);
+    gradUp.addColorStop(0, 'rgba(16,185,129,.25)');
+    gradUp.addColorStop(1, 'rgba(16,185,129,.0)');
+    const gradDn = upGrad.createLinearGradient(0, 0, 0, 260);
+    gradDn.addColorStop(0, 'rgba(59,130,246,.25)');
+    gradDn.addColorStop(1, 'rgba(59,130,246,.0)');
 
     totalChart = new Chart(document.getElementById('chartTotal'), {
         type: 'line',
         data: {
             labels: [],
             datasets: [
-                { label: 'Upload', data: [], borderColor: '#2ecc71', backgroundColor: 'rgba(46,204,113,.1)', fill: true, tension: 0.3, pointRadius: 0 },
-                { label: 'Download', data: [], borderColor: '#3498db', backgroundColor: 'rgba(52,152,219,.1)', fill: true, tension: 0.3, pointRadius: 0 },
+                { label: 'Upload', data: [], borderColor: '#10b981', backgroundColor: gradUp, fill: true, tension: 0.35, pointRadius: 0, borderWidth: 2 },
+                { label: 'Download', data: [], borderColor: '#3b82f6', backgroundColor: gradDn, fill: true, tension: 0.35, pointRadius: 0, borderWidth: 2 },
             ]
         },
-        options: { ...chartDefaults }
+        options: structuredClone(chartDefaults)
     });
 
     clientChart = new Chart(document.getElementById('chartClients'), {
         type: 'line',
         data: { labels: [], datasets: [] },
-        options: { ...chartDefaults }
+        options: structuredClone(chartDefaults)
     });
 }
 
-const clientColors = ['#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd','#8c564b','#e377c2','#7f7f7f','#bcbd22','#17becf'];
+const clientColors = ['#6366f1','#f59e0b','#10b981','#ef4444','#a855f7','#06b6d4','#ec4899','#84cc16','#f97316','#14b8a6'];
 let knownClients = new Set();
 
 function updateCharts(data) {
     if (!totalChart) return;
-
     const ts = new Date(data.timestamp * 1000).toLocaleTimeString();
 
-    // Total chart
     totalChart.data.labels.push(ts);
     totalChart.data.datasets[0].data.push(data.total_up);
     totalChart.data.datasets[1].data.push(data.total_dn);
@@ -407,7 +568,6 @@ function updateCharts(data) {
     }
     totalChart.update('none');
 
-    // Per-client chart
     clientChart.data.labels.push(ts);
     if (clientChart.data.labels.length > MAX_POINTS) {
         clientChart.data.labels.shift();
@@ -415,27 +575,19 @@ function updateCharts(data) {
     }
 
     if (data.clients) {
-        Object.entries(data.clients).forEach(([name, m], idx) => {
-            // Add datasets dynamically for new clients
+        Object.entries(data.clients).forEach(([name, m]) => {
             if (!knownClients.has(name)) {
                 knownClients.add(name);
                 const ci = (knownClients.size - 1) % clientColors.length;
                 clientChart.data.datasets.push({
-                    label: name + ' ↑',
-                    data: new Array(clientChart.data.labels.length - 1).fill(null),
-                    borderColor: clientColors[ci],
-                    borderDash: [],
-                    tension: 0.3, pointRadius: 0, fill: false,
+                    label: name + ' ↑', data: new Array(clientChart.data.labels.length - 1).fill(null),
+                    borderColor: clientColors[ci], borderDash: [], tension: 0.35, pointRadius: 0, fill: false, borderWidth: 2,
                 });
                 clientChart.data.datasets.push({
-                    label: name + ' ↓',
-                    data: new Array(clientChart.data.labels.length - 1).fill(null),
-                    borderColor: clientColors[ci],
-                    borderDash: [5, 3],
-                    tension: 0.3, pointRadius: 0, fill: false,
+                    label: name + ' ↓', data: new Array(clientChart.data.labels.length - 1).fill(null),
+                    borderColor: clientColors[ci], borderDash: [5, 3], tension: 0.35, pointRadius: 0, fill: false, borderWidth: 1.5,
                 });
             }
-            // Find dataset index
             const upIdx = clientChart.data.datasets.findIndex(d => d.label === name + ' ↑');
             const dnIdx = clientChart.data.datasets.findIndex(d => d.label === name + ' ↓');
             if (upIdx >= 0) clientChart.data.datasets[upIdx].data.push(m.up);
@@ -451,43 +603,65 @@ function updateStats(data) {
     document.getElementById('statTotal').textContent = (data.total_up + data.total_dn).toFixed(1);
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Section Toggle
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function toggleSection(id) {
+    const body = document.getElementById(id + 'Body');
+    const icon = document.getElementById(id + 'Icon');
+    body.classList.toggle('collapsed');
+    icon.classList.toggle('collapsed');
+}
 
-// ── Test State ─────────────────────────────────────────────────────
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Test State
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function setTestState(state) {
     testRunning = state === 'running';
     const badge = document.getElementById('testBadge');
     const btnStart = document.getElementById('btnStart');
     const btnStop = document.getElementById('btnStop');
+    const statusCard = document.getElementById('testStatusCard');
 
     if (state === 'running') {
-        badge.className = 'test-status-badge running';
+        badge.className = 'status-pill status-pill--running';
         badge.textContent = '● Running';
+        statusCard.textContent = 'Running';
         btnStart.classList.add('hidden');
         btnStop.classList.remove('hidden');
         testStartTime = testStartTime || Date.now();
+        testDuration = parseInt(document.getElementById('duration').value) || 30;
         if (elapsedTimer) clearInterval(elapsedTimer);
         elapsedTimer = setInterval(() => {
             const s = Math.floor((Date.now() - testStartTime) / 1000);
             document.getElementById('statElapsed').textContent = s + 's';
+            const pct = Math.min(100, (s / testDuration) * 100);
+            document.getElementById('progressFill').style.width = pct + '%';
+            document.getElementById('progressText').textContent = Math.round(pct) + '%';
         }, 1000);
     } else if (state === 'stopping') {
-        badge.className = 'test-status-badge stopping';
+        badge.className = 'status-pill status-pill--stopping';
         badge.textContent = '● Stopping';
+        statusCard.textContent = 'Stopping';
         btnStop.disabled = true;
     } else {
-        badge.className = 'test-status-badge idle';
+        badge.className = 'status-pill status-pill--idle';
         badge.textContent = '● Idle';
+        statusCard.textContent = 'Idle';
         btnStart.classList.remove('hidden');
         btnStop.classList.add('hidden');
         btnStop.disabled = false;
         if (elapsedTimer) clearInterval(elapsedTimer);
         testStartTime = null;
         knownClients = new Set();
+        document.getElementById('progressFill').style.width = '100%';
+        document.getElementById('progressText').textContent = '100%';
     }
 }
 
-
-// ── API Calls ──────────────────────────────────────────────────────
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// API Helper
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 async function api(method, url, body) {
     const opts = { method, headers: { 'Content-Type': 'application/json' } };
     if (body !== undefined) opts.body = JSON.stringify(body);
@@ -495,62 +669,88 @@ async function api(method, url, body) {
     return res.json();
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Agents
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 async function discoverAgents() {
-    appendLog('[agents] Discovering via UDP broadcast...');
+    appendLog('Discovering agents via UDP broadcast…', 'info');
+    showToast('Scanning network for agents…', 'info', 3000);
     const data = await api('POST', '/api/agents/discover');
-    appendLog(`[agents] Found ${data.discovered} agent(s)`);
+    appendLog(`Found ${data.discovered} agent(s)`, data.discovered > 0 ? 'success' : '');
     if (data.agents) {
         data.agents.forEach(a => { agents[a.id] = a; });
         renderAgents();
     }
+    showToast(`Discovered ${data.discovered} agent(s)`, data.discovered > 0 ? 'success' : 'warning');
 }
 
 async function addAgent() {
     const url = document.getElementById('agentUrl').value.trim();
     const name = document.getElementById('agentName').value.trim();
     const apiKey = document.getElementById('agentApiKey').value.trim();
-    if (!url) return;
-    const data = await api('POST', '/api/agents', { url, name, api_key: apiKey });
-    agents[data.id] = data;
-    renderAgents();
-    hideAddAgentModal();
-    appendLog(`[agents] Added ${data.name} (${data.status})`);
+    if (!url) { showToast('Agent URL is required', 'warning'); return; }
+    try {
+        const data = await api('POST', '/api/agents', { url, name, api_key: apiKey });
+        if (data.id) {
+            agents[data.id] = data;
+            renderAgents();
+            hideAddAgentModal();
+            showToast(`Agent added: ${data.name}`, 'success');
+            appendLog(`Agent added: ${data.name} (${data.status})`, 'success');
+        } else if (data.error) {
+            showToast(data.error, 'error');
+        }
+    } catch (e) {
+        showToast('Failed to add agent: ' + e.message, 'error');
+    }
 }
 
 async function removeAgent(id) {
+    const a = agents[id];
     await api('DELETE', `/api/agents/${id}`);
     delete agents[id];
     renderAgents();
-}
-
-async function refreshAgents() {
-    const list = await api('GET', '/api/agents?refresh=1');
-    list.forEach(a => { agents[a.id] = a; });
-    renderAgents();
+    showToast(`Removed agent: ${a?.name || id}`, 'info');
 }
 
 function renderAgents() {
     const el = document.getElementById('agentList');
-    const empty = document.getElementById('agentEmpty');
     const keys = Object.keys(agents);
 
+    // Update overview cards
+    document.getElementById('totalAgents').textContent = keys.length;
+    document.getElementById('onlineAgents').textContent = keys.filter(id => agents[id].status === 'online').length;
+
     if (keys.length === 0) {
-        el.innerHTML = '<li class="agent-empty">No agents — click Discover or Add</li>';
+        el.innerHTML = `<li class="empty-state" id="agentEmpty">
+            <i data-lucide="wifi-off"></i>
+            <p>No agents connected</p>
+            <span>Click Discover or + to get started</span>
+        </li>`;
     } else {
         el.innerHTML = keys.map(id => {
             const a = agents[id];
             const st = a.status || 'unknown';
-            return `<li class="agent-item">
-                <span class="agent-dot ${st}"></span>
+            const ips = a.details?.ips || [];
+            const servers = a.details?.servers || [];
+            const onlineSrv = servers.filter(s => s.alive).length;
+            return `<li class="agent-card">
+                <div class="agent-status-dot ${st}"></div>
                 <div class="agent-info">
                     <div class="agent-name">${esc(a.name)}</div>
                     <div class="agent-url">${esc(a.url)}</div>
+                    <div class="agent-meta">
+                        ${ips.length ? `<span class="agent-tag">${esc(ips[0])}</span>` : ''}
+                        ${servers.length ? `<span class="agent-tag">${onlineSrv}/${servers.length} srv</span>` : ''}
+                    </div>
                 </div>
-                <button class="agent-remove" onclick="removeAgent('${id}')" title="Remove">✕</button>
+                <button class="agent-remove" onclick="removeAgent('${id}')" title="Remove">
+                    <i data-lucide="x"></i>
+                </button>
             </li>`;
         }).join('');
     }
+    lucide.createIcons({ attrs: { 'stroke-width': 2 } });
     updateAgentDropdowns();
 }
 
@@ -566,7 +766,9 @@ function updateAgentDropdowns() {
     });
 }
 
-// Clients table
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Clients Table
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 let clientCounter = 0;
 
 function addClientRow(data) {
@@ -588,16 +790,17 @@ function addClientRow(data) {
         </select></td>
         <td><input class="client-parallel" type="number" value="${data?.parallel || ''}" min="1" style="width:55px"></td>
         <td class="checkbox-cell"><input class="client-bidir" type="checkbox" ${data?.bidir ? 'checked' : ''}></td>
-        <td><button class="btn btn--sm btn--danger btn--icon" onclick="this.closest('tr').remove()" title="Remove">✕</button></td>
-    `;
+        <td><button class="btn-icon" style="color:var(--red)" onclick="this.closest('tr').remove()" title="Remove">
+            <i data-lucide="trash-2"></i>
+        </button></td>`;
     tbody.appendChild(tr);
-    // Set agent value after appending
-    if (data?.agent) {
-        tr.querySelector('.client-agent-select').value = data.agent;
-    }
+    if (data?.agent) tr.querySelector('.client-agent-select').value = data.agent;
+    lucide.createIcons({ attrs: { 'stroke-width': 2 } });
 }
 
-// Build config from form
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Config Build / Load
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function buildConfig() {
     const mode = document.querySelector('input[name="mode"]:checked')?.value || 'bidir';
     const clients = [];
@@ -611,14 +814,9 @@ function buildConfig() {
             bidir: tr.querySelector('.client-bidir').checked || undefined,
         });
     });
-
     return {
-        server: {
-            agent: document.getElementById('serverAgent').value,
-            bind: document.getElementById('serverBind').value,
-        },
-        clients,
-        mode,
+        server: { agent: document.getElementById('serverAgent').value, bind: document.getElementById('serverBind').value },
+        clients, mode,
         duration_sec: parseInt(document.getElementById('duration').value) || 30,
         base_port: parseInt(document.getElementById('basePort').value) || 5211,
         poll_interval_sec: parseFloat(document.getElementById('pollInterval').value) || 1.0,
@@ -631,18 +829,13 @@ function buildConfig() {
     };
 }
 
-// Populate form from config
 function loadConfig(cfg) {
     if (cfg.server) {
         document.getElementById('serverAgent').value = cfg.server.agent || '';
         document.getElementById('serverBind').value = cfg.server.bind || '';
     }
-    if (cfg.server_agent) {
-        document.getElementById('serverAgent').value = cfg.server_agent || '';
-    }
-    if (cfg.server_bind) {
-        document.getElementById('serverBind').value = cfg.server_bind || '';
-    }
+    if (cfg.server_agent) document.getElementById('serverAgent').value = cfg.server_agent || '';
+    if (cfg.server_bind)  document.getElementById('serverBind').value = cfg.server_bind || '';
     document.getElementById('duration').value = cfg.duration_sec || 30;
     document.getElementById('basePort').value = cfg.base_port || 5211;
     document.getElementById('pollInterval').value = cfg.poll_interval_sec || 1.0;
@@ -652,51 +845,51 @@ function loadConfig(cfg) {
     document.getElementById('bitrate').value = cfg.bitrate || '';
     document.getElementById('tcpWindow').value = cfg.tcp_window || '';
     document.getElementById('apiKey').value = cfg.api_key || '';
-
     const mode = cfg.mode || 'bidir';
     const radio = document.querySelector(`input[name="mode"][value="${mode}"]`);
     if (radio) radio.checked = true;
-
-    // Clients
     document.getElementById('clientsBody').innerHTML = '';
     clientCounter = 0;
-    if (cfg.clients) {
-        cfg.clients.forEach(c => addClientRow(c));
-    }
+    if (cfg.clients) cfg.clients.forEach(c => addClientRow(c));
 }
 
-// Test control
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Test Control
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 async function startTest() {
     const cfg = buildConfig();
     if (!cfg.server?.agent) {
-        alert('Select a server agent first.');
+        showToast('Select a server agent first', 'warning');
         return;
     }
     if (!cfg.clients || cfg.clients.length === 0) {
-        alert('Add at least one client.');
+        showToast('Add at least one client', 'warning');
         return;
     }
-    appendLog('[test] Starting...');
+    appendLog('Starting test…', 'info');
     setTestState('running');
     try {
         await api('POST', '/api/test/start', cfg);
     } catch (e) {
-        appendLog('[test] Failed to start: ' + e.message, 'error');
+        appendLog('Failed to start: ' + e.message, 'error');
+        showToast('Failed to start test', 'error');
         setTestState('idle');
     }
 }
 
 async function stopTest() {
-    appendLog('[test] Stopping...');
+    appendLog('Stopping test…', 'info');
     setTestState('stopping');
     await api('POST', '/api/test/stop');
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Profiles
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 async function refreshProfiles() {
     const list = await api('GET', '/api/profiles');
     const sel = document.getElementById('profileSelect');
-    sel.innerHTML = '<option value="">— Profiles —</option>' +
+    sel.innerHTML = '<option value="">Select profile…</option>' +
         list.map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join('');
 }
 
@@ -706,7 +899,8 @@ async function loadSelectedProfile() {
     const data = await api('GET', `/api/profiles/${encodeURIComponent(name)}`);
     if (data.config) {
         loadConfig(data.config);
-        appendLog(`[profile] Loaded: ${name}`);
+        showToast(`Loaded profile: ${name}`, 'success');
+        appendLog(`Profile loaded: ${name}`, 'info');
     }
 }
 
@@ -722,10 +916,11 @@ function hideSaveProfileModal() {
 
 async function saveProfile() {
     const name = document.getElementById('profileName').value.trim();
-    if (!name) return;
+    if (!name) { showToast('Enter a profile name', 'warning'); return; }
     const cfg = buildConfig();
     await api('POST', '/api/profiles', { name, config: cfg });
-    appendLog(`[profile] Saved: ${name}`);
+    showToast(`Profile saved: ${name}`, 'success');
+    appendLog(`Profile saved: ${name}`, 'success');
     hideSaveProfileModal();
     refreshProfiles();
 }
@@ -733,72 +928,82 @@ async function saveProfile() {
 async function deleteSelectedProfile() {
     const name = document.getElementById('profileSelect').value;
     if (!name) return;
-    if (!confirm(`Delete profile "${name}"?`)) return;
     await api('DELETE', `/api/profiles/${encodeURIComponent(name)}`);
-    appendLog(`[profile] Deleted: ${name}`);
+    showToast(`Profile deleted: ${name}`, 'info');
+    appendLog(`Profile deleted: ${name}`, 'info');
     refreshProfiles();
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Reports
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 async function refreshReports() {
     const list = await api('GET', '/api/reports');
     const el = document.getElementById('reportsList');
     if (!list || list.length === 0) {
-        el.innerHTML = '<li class="text-dim text-sm">No files yet</li>';
+        el.innerHTML = '<li class="empty-state-sm">No reports yet</li>';
         return;
     }
     el.innerHTML = list.map(f => {
-        const size = f.size > 1024*1024 ? (f.size/1024/1024).toFixed(1) + ' MB' :
-                     f.size > 1024 ? (f.size/1024).toFixed(1) + ' KB' : f.size + ' B';
-        return `<li>
+        const size = f.size > 1048576 ? (f.size / 1048576).toFixed(1) + ' MB' :
+                     f.size > 1024 ? (f.size / 1024).toFixed(1) + ' KB' : f.size + ' B';
+        return `<li class="report-item">
             <a href="/api/reports/${encodeURIComponent(f.name)}" target="_blank">${esc(f.name)}</a>
             <span class="file-size">${size}</span>
         </li>`;
     }).join('');
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Log
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function appendLog(msg, cls) {
     const el = document.getElementById('logOutput');
     const line = document.createElement('div');
     line.className = 'log-line' + (cls ? ' ' + cls : '');
-    line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    const ts = new Date().toLocaleTimeString('en-GB', { hour12: false });
+    line.textContent = `${ts}  ${msg}`;
     el.appendChild(line);
     el.scrollTop = el.scrollHeight;
+    // Keep max 500 lines
+    while (el.children.length > 500) el.removeChild(el.firstChild);
 }
 
 function clearLog() {
     document.getElementById('logOutput').innerHTML = '';
+    appendLog('Log cleared', 'info');
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Modals
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function showAddAgentModal() {
     document.getElementById('agentUrl').value = '';
     document.getElementById('agentName').value = '';
     document.getElementById('agentApiKey').value = '';
     document.getElementById('addAgentModal').classList.add('active');
-    document.getElementById('agentUrl').focus();
+    setTimeout(() => document.getElementById('agentUrl').focus(), 100);
 }
 
 function hideAddAgentModal() {
     document.getElementById('addAgentModal').classList.remove('active');
 }
 
-// Close modals on backdrop click
 document.querySelectorAll('.modal-overlay').forEach(ov => {
     ov.addEventListener('click', e => {
         if (e.target === ov) ov.classList.remove('active');
     });
 });
 
-// Close modals on Escape
 document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
         document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
     }
 });
 
-// Utility
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Utilities
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function esc(s) {
     if (!s) return '';
     const d = document.createElement('div');
@@ -806,15 +1011,16 @@ function esc(s) {
     return d.innerHTML;
 }
 
-// ── Init ───────────────────────────────────────────────────────────
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Init
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 (async function init() {
+    lucide.createIcons({ attrs: { 'stroke-width': 2 } });
     await refreshProfiles();
     await refreshReports();
-    // Add a default client row
     addClientRow();
-    appendLog('[init] Dashboard ready');
+    appendLog('Dashboard ready', 'info');
 })();
 </script>
-
 </body>
 </html>
