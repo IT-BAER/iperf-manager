@@ -1,70 +1,53 @@
-import type { TestState } from '../types'
-
-type View = 'dashboard' | 'reports'
-
 interface Props {
-  view: View
-  onViewChange: (v: View) => void
+  connected: boolean
   sidebarOpen: boolean
   onToggleSidebar: () => void
-  testState: TestState
+  activeTab: string
+  onTabChange: (tab: 'test' | 'results' | 'reports') => void
 }
 
-export function Header({ view, onViewChange, sidebarOpen, onToggleSidebar, testState }: Props) {
+const TABS = [
+  { id: 'test' as const, label: 'Test' },
+  { id: 'reports' as const, label: 'Reports' },
+] as const
+
+export function Header({ connected, sidebarOpen, onToggleSidebar, activeTab, onTabChange }: Props) {
   return (
-    <header className="h-[52px] flex items-center gap-3 px-4 border-b border-line bg-surface shrink-0">
+    <header className="h-11 shrink-0 border-b border-line bg-surface flex items-center px-3 gap-3">
       <button
         onClick={onToggleSidebar}
-        className="btn btn-sm w-7 px-0 justify-center"
-        aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+        className="btn btn-sm w-7 px-0 justify-center text-xs"
+        aria-label="Toggle sidebar"
       >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-          {sidebarOpen ? (
-            <path d="M3 4h10M3 8h10M3 12h10" strokeLinecap="round" />
-          ) : (
-            <path d="M3 4h10M3 8h6M3 12h10" strokeLinecap="round" />
-          )}
-        </svg>
+        <i className={`fa-solid ${sidebarOpen ? 'fa-chevron-left' : 'fa-chevron-right'} text-[10px]`} />
       </button>
 
-      <div className="flex items-center gap-2 mr-4">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-        <span className="text-sm font-semibold tracking-tight">iperf-manager</span>
-      </div>
+      <h1 className="text-sm font-semibold text-fg tracking-tight select-none">
+        iperf-manager
+      </h1>
 
-      <nav className="flex gap-0.5" role="tablist">
-        {(['dashboard', 'reports'] as const).map(tab => (
+      <nav className="flex gap-1 ml-4">
+        {TABS.map(tab => (
           <button
-            key={tab}
-            role="tab"
-            aria-selected={view === tab}
-            onClick={() => onViewChange(tab)}
-            className={`h-8 px-3 text-[13px] rounded-sm transition-colors duration-150
-              ${view === tab
-                ? 'bg-surface-active text-fg font-medium'
-                : 'text-fg-3 hover:text-fg-2 hover:bg-surface-hover'}`}
+            key={tab.id}
+            onClick={() => onTabChange(tab.id)}
+            className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+              activeTab === tab.id
+                ? 'bg-accent/15 text-accent'
+                : 'text-fg-3 hover:text-fg hover:bg-surface-hover'
+            }`}
           >
-            {tab === 'dashboard' ? 'Dashboard' : 'Reports'}
+            {tab.label}
           </button>
         ))}
       </nav>
 
       <div className="flex-1" />
 
-      {testState.status === 'running' && (
-        <div className="flex items-center gap-2 text-[13px]">
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-ok opacity-75" />
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-ok" />
-          </span>
-          <span className="text-ok tabular">Test running</span>
-        </div>
-      )}
-      {testState.status === 'stopping' && (
-        <span className="text-[13px] text-warn">Stopping…</span>
-      )}
+      <span className={`w-2 h-2 rounded-full ${connected ? 'bg-ok' : 'bg-err'}`} />
+      <span className="text-[11px] text-fg-3">
+        {connected ? 'Connected' : 'Disconnected'}
+      </span>
     </header>
   )
 }

@@ -2,7 +2,7 @@
 """
 test_runner.py - iperf3 테스트 실행 엔진
 
-controller_v5_18.py의 main() 로직을 라이브러리 함수로 추출.
+Test orchestration extracted as a library function.
 Dashboard(직접 호출)과 Controller CLI(래퍼) 모두에서 사용.
 """
 from __future__ import annotations
@@ -153,8 +153,12 @@ def run_test(cfg: dict,
     # Write CSV (only if csv_path is given)
     if csv_path is not None:
         try:
+            proto = str(cfg.get('proto') or 'tcp').lower()
+            server_name = server_cfg.get('name', '')
             with open(csv_path, 'w', encoding='utf-8', newline='') as fp:
                 w = csv.DictWriter(fp, fieldnames=csv_cols)
+                # Write schema comment row so metadata parsers can detect protocol and server
+                fp.write(f'# schema,wide_v1,units: ts=epoch(s), up/dn(Mbps),proto,{proto},server,{server_name}\n')
                 w.writeheader()
                 for row in csv_rows:
                     w.writerow(row)

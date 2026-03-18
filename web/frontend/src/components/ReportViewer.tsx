@@ -12,7 +12,6 @@ import {
 } from 'chart.js'
 import { Line } from 'react-chartjs-2'
 import type { ChartData, ChartOptions } from 'chart.js'
-import { parseCSV } from '../api'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler)
 
@@ -25,11 +24,10 @@ type SortDir = 'asc' | 'desc'
 
 function parseMbps(val: string): number {
   const n = parseFloat(val)
-  return isNaN(n) ? 0 : n / 1e6
+  return isNaN(n) ? 0 : n
 }
 
-function fmtMbps(bps: number): string {
-  const mbps = bps / 1e6
+function fmtMbps(mbps: number): string {
   if (mbps >= 1000) return `${(mbps / 1000).toFixed(2)} Gbps`
   return `${mbps.toFixed(1)} Mbps`
 }
@@ -47,16 +45,15 @@ export default function ReportViewer({ filename, onBack }: ReportViewerProps) {
   useEffect(() => {
     setLoading(true)
     setError(null)
-    fetch(`/api/reports/${encodeURIComponent(filename)}`)
+    fetch(`/api/reports/${encodeURIComponent(filename)}/data`)
       .then(r => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.text()
+        return r.json()
       })
-      .then(text => {
-        const { columns: cols, rows: data } = parseCSV(text)
-        setColumns(cols)
-        setRows(data)
-        setSortCol(cols[0] ?? '')
+      .then((data: { columns: string[]; rows: Record<string, string>[] }) => {
+        setColumns(data.columns)
+        setRows(data.rows)
+        setSortCol(data.columns[0] ?? '')
       })
       .catch(e => setError((e as Error).message))
       .finally(() => setLoading(false))
@@ -233,7 +230,7 @@ export default function ReportViewer({ filename, onBack }: ReportViewerProps) {
                       >
                         <span>{col}</span>
                         {sortCol === col && (
-                          <span className="ml-1 text-accent">{sortDir === 'asc' ? '▲' : '▼'}</span>
+                          <i className={`fa-solid ${sortDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down'} ml-1 text-accent text-[10px]`} />
                         )}
                       </th>
                     ))}

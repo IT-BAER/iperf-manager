@@ -26,6 +26,7 @@ class CsvRecorder:
         run_base: str,
         agent_names: list[str],
         proto: str = 'tcp',
+        server_name: str = '',
         roll_minutes: int = 0,
         zip_rolled: bool = True,
     ):
@@ -34,6 +35,7 @@ class CsvRecorder:
         self.run_base = run_base
         self.agent_names = list(agent_names)
         self.proto = proto
+        self.server_name = server_name
         self.roll_minutes = roll_minutes
         self.zip_rolled = zip_rolled
 
@@ -61,7 +63,7 @@ class CsvRecorder:
             header += [f'{a}_up', f'{a}_dn', f'{a}_jit_ms', f'{a}_loss_pct', f'{a}_sent_mb', f'{a}_recv_mb']
         with open(path, 'w', newline='', encoding='utf-8') as fp:
             w = csv.writer(fp)
-            w.writerow(['# schema', 'wide_v1', 'units: ts=epoch(s), up/dn(Mbps), jit(ms), loss(%)', 'proto', self.proto])
+            w.writerow(['# schema', 'wide_v1', 'units: ts=epoch(s), up/dn(Mbps), jit(ms), loss(%)', 'proto', self.proto, 'server', self.server_name])
             w.writerow(header)
         self._current_path = str(path)
         self._open_ts = time.time()

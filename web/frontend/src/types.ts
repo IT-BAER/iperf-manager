@@ -36,6 +36,7 @@ export interface ClientRow {
   agent: string
   name: string
   server_target: string
+  bind: string
   api_key: string
 }
 
