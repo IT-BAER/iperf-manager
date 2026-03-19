@@ -4,7 +4,6 @@ export interface Agent {
   name: string
   status: 'online' | 'offline' | 'unknown'
   last_seen: number | null
-  api_key: string
   details: Record<string, unknown>
 }
 
@@ -14,6 +13,12 @@ export interface TestState {
   finished_at?: number
   config?: TestConfig
   last_csv?: string
+}
+
+export interface AuthSession {
+  enabled: boolean
+  authenticated: boolean
+  username: string
 }
 
 export interface TestConfig {

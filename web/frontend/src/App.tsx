@@ -2,8 +2,9 @@
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import { useSocket } from './hooks/useSocket'
 import { api } from './api'
-import type { Agent, TestState, TestConfig, Metrics, LogEntry } from './types'
+import type { Agent, AuthSession, TestState, TestConfig, Metrics, LogEntry } from './types'
 
+import { AuthPanel } from './components/AuthPanel'
 import { Header } from './components/Header'
 import { Sidebar } from './components/Sidebar'
 import { KPIBar } from './components/KPIBar'
@@ -77,12 +78,12 @@ function ReportList({ onSelect }: { onSelect: (name: string) => void }) {
     if (selected.size === 0) return
     setDeleting(true)
     try {
-      await fetch('/api/reports', {
+      const data = await api<{ deleted: string[] }>('/api/reports', {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ files: [...selected] }),
       })
-      window.dispatchEvent(new CustomEvent('toast', { detail: { msg: `Deleted ${selected.size} report${selected.size > 1 ? 's' : ''}`, type: 'success' } }))
+      if (!data) return
+      window.dispatchEvent(new CustomEvent('toast', { detail: { msg: `Deleted ${selected.size} report${selected.size > 1 ? 's' : ''}`, type: 'ok' } }))
       setSelected(new Set())
       load()
     } finally {
@@ -92,14 +93,11 @@ function ReportList({ onSelect }: { onSelect: (name: string) => void }) {
 
   const deleteSingle = async (name: string, e: ReactMouseEvent) => {
     e.stopPropagation()
-    try {
-      await fetch(`/api/reports/${encodeURIComponent(name)}`, { method: 'DELETE' })
-      window.dispatchEvent(new CustomEvent('toast', { detail: { msg: `Deleted ${name}`, type: 'success' } }))
-      setFiles(prev => prev.filter(f => f.name !== name))
-      setSelected(prev => { const s = new Set(prev); s.delete(name); return s })
-    } catch {
-      window.dispatchEvent(new CustomEvent('toast', { detail: { msg: `Failed to delete ${name}`, type: 'error' } }))
-    }
+    const data = await api<{ deleted: string }>(`/api/reports/${encodeURIComponent(name)}`, { method: 'DELETE' })
+    if (!data) return
+    window.dispatchEvent(new CustomEvent('toast', { detail: { msg: `Deleted ${name}`, type: 'ok' } }))
+    setFiles(prev => prev.filter(f => f.name !== name))
+    setSelected(prev => { const s = new Set(prev); s.delete(name); return s })
   }
 
   if (files.length === 0) {
@@ -206,10 +204,11 @@ function ReportList({ onSelect }: { onSelect: (name: string) => void }) {
 type Tab = 'test' | 'results' | 'reports'
 
 export function App() {
-  const { on, connected } = useSocket()
   const didInitializeAgents = useRef(false)
 
   // ── State ─────────────────────────────────────────────────────
+  const [auth, setAuth] = useState<AuthSession | null>(null)
+  const [authBusy, setAuthBusy] = useState(false)
   const [agents, setAgents] = useState<Agent[]>([])
   const [testState, setTestState] = useState<TestState>({ status: 'idle' })
   const [latestMetrics, setLatestMetrics] = useState<Metrics | null>(null)
@@ -221,11 +220,29 @@ export function App() {
   const [isDiscovering, setIsDiscovering] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
 
+  const authEnabled = auth?.enabled ?? false
+  const isAuthenticated = auth ? (!auth.enabled || auth.authenticated) : false
+  const { on, connected } = useSocket(auth !== null && isAuthenticated)
+
   const agentsMap = useMemo(() => {
     const m: Record<string, Agent> = {}
     agents.forEach(a => { m[a.id] = a })
     return m
   }, [agents])
+
+  const resetRuntimeState = useCallback(() => {
+    setAgents([])
+    setTestState({ status: 'idle' })
+    setLatestMetrics(null)
+    setMetricsHistory([])
+    setLogs([])
+    setSelectedReport(null)
+  }, [])
+
+  const loadAuth = useCallback(async () => {
+    const data = await api<AuthSession>('/api/auth/session', { onUnauthorized: 'error' })
+    if (data) setAuth(data)
+  }, [])
 
   // ── Socket.IO listeners ───────────────────────────────────────
   useEffect(() => {
@@ -274,6 +291,45 @@ export function App() {
     window.dispatchEvent(new CustomEvent('toast', { detail: { msg, type } }))
   }, [])
 
+  useEffect(() => {
+    void loadAuth()
+  }, [loadAuth])
+
+  useEffect(() => {
+    const handleAuthRequired = () => {
+      resetRuntimeState()
+      didInitializeAgents.current = false
+      setAuth(prev => prev ? { ...prev, authenticated: false, username: '' } : { enabled: true, authenticated: false, username: '' })
+    }
+
+    window.addEventListener('auth-required', handleAuthRequired)
+    return () => window.removeEventListener('auth-required', handleAuthRequired)
+  }, [resetRuntimeState])
+
+  const login = useCallback(async (username: string, password: string) => {
+    setAuthBusy(true)
+    try {
+      const data = await api<AuthSession>('/api/auth/session', {
+        method: 'POST',
+        body: JSON.stringify({ username, password }),
+        onUnauthorized: 'error',
+      })
+      if (data) {
+        didInitializeAgents.current = false
+        setAuth(data)
+      }
+    } finally {
+      setAuthBusy(false)
+    }
+  }, [])
+
+  const logout = useCallback(async () => {
+    await api<AuthSession>('/api/auth/session', { method: 'DELETE', onUnauthorized: 'error' })
+    resetRuntimeState()
+    didInitializeAgents.current = false
+    setAuth(prev => prev ? { ...prev, authenticated: false, username: '' } : prev)
+  }, [resetRuntimeState])
+
   const refreshAgents = useCallback(async () => {
     setIsRefreshing(true)
     try {
@@ -288,10 +344,10 @@ export function App() {
     }
   }, [toast])
 
-  const addAgent = useCallback(async (url: string, name: string) => {
+  const addAgent = useCallback(async (url: string, name: string, apiKey: string) => {
     const data = await api<Agent>('/api/agents', {
       method: 'POST',
-      body: JSON.stringify({ url, name }),
+      body: JSON.stringify({ url, name, api_key: apiKey }),
     })
     if (data) {
       setAgents(prev => [...prev.filter(a => a.id !== data.id), data])
@@ -344,6 +400,10 @@ export function App() {
 
   // ── Initial load ──────────────────────────────────────────────
   useEffect(() => {
+    if (!auth || !isAuthenticated) {
+      didInitializeAgents.current = false
+      return
+    }
     if (didInitializeAgents.current) return
     didInitializeAgents.current = true
 
@@ -351,7 +411,24 @@ export function App() {
       await refreshAgents()
       await discoverAgents({ silent: true })
     })()
-  }, [discoverAgents, refreshAgents])
+  }, [auth, discoverAgents, isAuthenticated, refreshAgents])
+
+  if (!auth) {
+    return (
+      <div className="min-h-screen bg-bg text-fg flex items-center justify-center">
+        <div className="text-[13px] uppercase tracking-[0.22em] text-fg-3">Loading dashboard…</div>
+      </div>
+    )
+  }
+
+  if (authEnabled && !isAuthenticated) {
+    return (
+      <>
+        <AuthPanel loading={authBusy} onSubmit={login} />
+        <Toast />
+      </>
+    )
+  }
 
   // ── Render ────────────────────────────────────────────────────
   return (
@@ -362,6 +439,8 @@ export function App() {
         onToggleSidebar={() => setSidebarOpen(prev => !prev)}
         activeTab={activeTab}
         onTabChange={setActiveTab}
+        authUser={auth.username}
+        onLogout={authEnabled ? logout : undefined}
       />
 
       <div className="flex flex-1 overflow-hidden">

@@ -13,14 +13,15 @@ import sys
 
 def main():
     parser = argparse.ArgumentParser(description="iperf-manager web dashboard")
-    parser.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0)")
+    parser.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=5000, help="Listen port (default: 5000)")
     parser.add_argument("--debug", action="store_true", help="Enable Flask debug mode")
     args = parser.parse_args()
 
-    from web.app import app, socketio
+    from web.app import app, auth_bootstrap_summary, socketio
 
     print(f"[iperf-manager] Starting web dashboard on http://{args.host}:{args.port}")
+    print(auth_bootstrap_summary())
     socketio.run(app, host=args.host, port=args.port, debug=args.debug,
                  allow_unsafe_werkzeug=True)
 

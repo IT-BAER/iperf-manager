@@ -6,6 +6,7 @@ iperf-manager is a distributed iperf3 orchestration platform with two deployable
 
 - Distributed agent orchestration over REST
 - Automatic agent discovery on page load, plus manual Discover and Refresh controls
+- Built-in session-based dashboard authentication with secure cookies, enabled by default
 - Live topology view and throughput charts over Socket.IO
 - TCP and UDP test support
 - Dashboard test modes: `bidirectional`, `upload`, `download`
@@ -70,6 +71,7 @@ By default, the agent reads its config from:
 - Linux: `~/.config/iperf3-agent/config.json`
 
 The deployment scripts override that location to system-managed paths. See [deploy/README-deploy.md](deploy/README-deploy.md).
+When you use the deployment scripts, they can also generate a random agent API token automatically if you do not pass one explicitly.
 
 ### 2. Start the web dashboard
 
@@ -79,6 +81,8 @@ python main_web.py --host 127.0.0.1 --port 5000
 ```
 
 Open `http://127.0.0.1:5000`.
+
+Dashboard auth is enabled by default. If you do not set credentials, startup prints a generated `admin` password. When you launch the app directly with `python main_web.py`, that generated password exists only for the current process and rotates on the next restart. For persistent service-managed credentials, configure `DASHBOARD_AUTH_USERNAME` and either `DASHBOARD_AUTH_PASSWORD_HASH` or `DASHBOARD_AUTH_PASSWORD`, or use the Linux setup script, which generates credentials on a fresh install and then preserves the stored hash on later reruns unless you explicitly override the auth settings. To opt out completely, set `DASHBOARD_AUTH_DISABLE=1`.
 
 ### 3. Rebuild the frontend when you change the React app
 
@@ -221,3 +225,7 @@ iperf-manager/
 ```
 
 > This repository originated from [swc00057/iperf-manager](https://github.com/swc00057/iperf-manager). It has since diverged into a server-hosted web dashboard with headless agents rather than the original client-oriented application.
+
+## License
+
+This project is released under the MIT License. See [LICENSE](LICENSE) for the full text.

@@ -38,6 +38,7 @@ export default function TestConfigPanel({
   const [config, setConfig] = useState<TestConfig>(DEFAULT_CONFIG)
 
   const isRunning = testState.status !== 'idle'
+  const canStart = Boolean(config.server_agent) && config.clients.length > 0
 
   // Keep parent in sync
   const onConfigChangeRef = useRef(onConfigChange)
@@ -151,8 +152,10 @@ export default function TestConfigPanel({
           <div className={SL}>Parameters</div>
           <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
             <div>
-              <label className={FL}>Duration (s)</label>
+              <label htmlFor="duration-sec" className={FL}>Duration (s)</label>
               <input
+                id="duration-sec"
+                name="durationSec"
                 type="number" min={1}
                 className="input-base"
                 value={config.duration_sec}
@@ -161,8 +164,10 @@ export default function TestConfigPanel({
               />
             </div>
             <div>
-              <label className={FL}>Base Port</label>
+              <label htmlFor="base-port" className={FL}>Base Port</label>
               <input
+                id="base-port"
+                name="basePort"
                 type="number" min={1024} max={65534}
                 className="input-base"
                 value={config.base_port}
@@ -171,8 +176,10 @@ export default function TestConfigPanel({
               />
             </div>
             <div>
-              <label className={FL}>Poll Interval (s)</label>
+              <label htmlFor="poll-interval-sec" className={FL}>Poll Interval (s)</label>
               <input
+                id="poll-interval-sec"
+                name="pollIntervalSec"
                 type="number" min={0.1} step={0.1}
                 className="input-base"
                 value={config.poll_interval_sec}
@@ -181,8 +188,10 @@ export default function TestConfigPanel({
               />
             </div>
             <div>
-              <label className={FL}>Parallel Streams</label>
+              <label htmlFor="parallel-streams" className={FL}>Parallel Streams</label>
               <input
+                id="parallel-streams"
+                name="parallelStreams"
                 type="number" min={1} max={128}
                 className="input-base"
                 value={config.parallel}
@@ -191,8 +200,10 @@ export default function TestConfigPanel({
               />
             </div>
             <div>
-              <label className={FL}>Omit (s)</label>
+              <label htmlFor="omit-sec" className={FL}>Omit (s)</label>
               <input
+                id="omit-sec"
+                name="omitSec"
                 type="number" min={0}
                 className="input-base"
                 value={config.omit_sec}
@@ -208,8 +219,10 @@ export default function TestConfigPanel({
           <div className={SL}>Advanced</div>
           <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
             <div>
-              <label className={FL}>Bitrate</label>
+              <label htmlFor="bitrate" className={FL}>Bitrate</label>
               <input
+                id="bitrate"
+                name="bitrate"
                 className="input-base"
                 placeholder="e.g. 100M or 0"
                 value={config.bitrate}
@@ -218,8 +231,10 @@ export default function TestConfigPanel({
               />
             </div>
             <div>
-              <label className={FL}>TCP Window</label>
+              <label htmlFor="tcp-window" className={FL}>TCP Window</label>
               <input
+                id="tcp-window"
+                name="tcpWindow"
                 className="input-base"
                 placeholder="e.g. 128K"
                 value={config.tcp_window}
@@ -274,7 +289,7 @@ export default function TestConfigPanel({
           <div className="flex items-center gap-2">
             <button
               className="btn btn-primary"
-              disabled={isRunning || !config.server_agent}
+              disabled={isRunning || !canStart}
               onClick={() => onStart(config)}
             >
               {isRunning && (
@@ -293,8 +308,10 @@ export default function TestConfigPanel({
             >
               Stop
             </button>
-            {!config.server_agent && !isRunning && (
-              <span className="text-[12px] text-fg-3 ml-1">Select a server agent to start</span>
+            {!isRunning && !canStart && (
+              <span className="text-[12px] text-fg-3 ml-1">
+                {config.server_agent ? 'Add at least one client agent to start' : 'Select a server agent to start'}
+              </span>
             )}
           </div>
         </div>
