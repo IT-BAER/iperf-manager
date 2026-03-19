@@ -14,6 +14,18 @@ iperf-manager is a distributed iperf3 orchestration platform with two deployable
 - Zero-pip-dependency agent runtime
 - Linux and Windows agent deployment scripts, plus a Linux web-service helper
 
+## Screenshots
+
+These screenshots were captured from the live local web UI with agent names, IP addresses, and other environment-specific details redacted.
+
+### Running Dashboard
+
+![Sanitized running dashboard overview](docs/images/dashboard-running.png)
+
+### Reports View
+
+![Sanitized reports overview](docs/images/reports-overview.png)
+
 ## Architecture
 
 ```text
@@ -208,4 +220,4 @@ iperf-manager/
     setup-web-service.sh
 ```
 
-> This project traces back to `chaeynz/iperf_manager`, but this codebase has diverged into a server-hosted web dashboard with headless agents rather than the original client-oriented application.
+> This repository originated from [swc00057/iperf-manager](https://github.com/swc00057/iperf-manager). It has since diverged into a server-hosted web dashboard with headless agents rather than the original client-oriented application.
