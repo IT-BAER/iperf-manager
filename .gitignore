@@ -45,3 +45,11 @@ web/frontend/dist/
 # Temp files
 _tmp_*.json
 *.tmp
+
+# Local Copilot agent instructions
+.github/instructions/
+*.instructions.md
+*.prompt.md
+*.agent.md
+AGENTS.md
+copilot-instructions.md

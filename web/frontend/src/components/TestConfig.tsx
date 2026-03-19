@@ -77,7 +77,7 @@ export default function TestConfigPanel({
   const toggleBtn = (active: boolean) =>
     `inline-flex items-center px-3 h-8 text-[13px] font-medium border-r border-line last:border-r-0 transition-colors duration-150 leading-none ` +
     (active
-      ? 'bg-accent text-white'
+      ? 'bg-accent-subtle text-accent'
       : 'text-fg-3 hover:text-fg hover:bg-surface-hover disabled:opacity-40 disabled:cursor-not-allowed')
 
   const statusLabel =
@@ -278,7 +278,11 @@ export default function TestConfigPanel({
               onClick={() => onStart(config)}
             >
               {isRunning && (
-                <span className="w-3.5 h-3.5 border-[2px] border-white/30 border-t-white rounded-full animate-spin shrink-0" />
+                <span className="btn-loader shrink-0" aria-hidden="true">
+                  <span />
+                  <span />
+                  <span />
+                </span>
               )}
               Start Test
             </button>

@@ -210,7 +210,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=${INSTALL_DIR}
-ExecStart=${PYTHON_BIN} main_agent.py --headless
+ExecStart=${PYTHON_BIN} main_agent.py
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal

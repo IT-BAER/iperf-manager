@@ -42,13 +42,16 @@ function formatElapsed(ms: number): string {
 }
 
 const CHART_COLORS = {
-  ok: '#3ec96a',
-  okFill: 'rgba(62,201,106,0.07)',
-  accent: '#4b8df8',
-  accentFill: 'rgba(75,141,248,0.07)',
-  grid: 'rgba(35,35,40,0.6)',
-  tick: '#6a6a74',
-  legend: '#9898a0',
+  ok: '#3fb950',
+  okFill: 'rgba(63,185,80,0.12)',
+  accent: '#58a6ff',
+  accentFill: 'rgba(88,166,255,0.14)',
+  grid: 'rgba(61,68,77,0.6)',
+  tick: '#9198a1',
+  legend: '#9198a1',
+  surface: '#151b23',
+  line: '#3d444d',
+  body: '#f0f6fc',
 }
 
 function buildLineOptions(): ChartOptions<'line'> {
@@ -59,11 +62,11 @@ function buildLineOptions(): ChartOptions<'line'> {
     plugins: {
       legend: { labels: { color: CHART_COLORS.legend, font: { size: 11 }, boxWidth: 12, padding: 12 } },
       tooltip: {
-        backgroundColor: '#19191d',
-        borderColor: '#232328',
+        backgroundColor: CHART_COLORS.surface,
+        borderColor: CHART_COLORS.line,
         borderWidth: 1,
         titleColor: CHART_COLORS.legend,
-        bodyColor: '#e8e8ec',
+        bodyColor: CHART_COLORS.body,
         padding: 8,
       },
     },
@@ -88,11 +91,11 @@ function buildBarOptions(): ChartOptions<'bar'> {
     plugins: {
       legend: { labels: { color: CHART_COLORS.legend, font: { size: 11 }, boxWidth: 12, padding: 12 } },
       tooltip: {
-        backgroundColor: '#19191d',
-        borderColor: '#232328',
+        backgroundColor: CHART_COLORS.surface,
+        borderColor: CHART_COLORS.line,
         borderWidth: 1,
         titleColor: CHART_COLORS.legend,
-        bodyColor: '#e8e8ec',
+        bodyColor: CHART_COLORS.body,
         padding: 8,
       },
     },
@@ -114,6 +117,8 @@ export default function LiveResults({ testState, metrics, metricsHistory }: Live
   const [open, setOpen] = useState(true)
   const [nowMs, setNowMs] = useState(Date.now())
   const isRunning = testState.status === 'running'
+  const mode = String(testState.config?.mode || '').toLowerCase()
+  const isBidirectional = mode === 'bidirectional'
 
   useEffect(() => {
     if (!isRunning) return
@@ -173,14 +178,14 @@ export default function LiveResults({ testState, metrics, metricsHistory }: Live
       {
         label: 'Upload',
         data: agentIds.map(id => metrics?.clients[id]?.up ?? 0),
-        backgroundColor: 'rgba(62,201,106,0.7)',
+        backgroundColor: 'rgba(63,185,80,0.72)',
         borderColor: CHART_COLORS.ok,
         borderWidth: 1,
       },
       {
         label: 'Download',
         data: agentIds.map(id => metrics?.clients[id]?.dn ?? 0),
-        backgroundColor: 'rgba(75,141,248,0.7)',
+        backgroundColor: 'rgba(47,129,247,0.72)',
         borderColor: CHART_COLORS.accent,
         borderWidth: 1,
       },
@@ -240,7 +245,9 @@ export default function LiveResults({ testState, metrics, metricsHistory }: Live
               <div className="text-[22px] font-bold font-mono tabular leading-none text-warn">
                 {formatBps(totalUp + totalDn)}
               </div>
-              <div className="text-[11px] font-medium uppercase tracking-wider text-fg-3 mt-1.5">Total</div>
+              <div className="text-[11px] font-medium uppercase tracking-wider text-fg-3 mt-1.5">
+                {isBidirectional ? 'Aggregate' : 'Total'}
+              </div>
             </div>
             <div className="bg-surface-raised border border-line rounded p-3">
               <div className="text-[22px] font-bold font-mono tabular leading-none text-fg-2">
@@ -249,6 +256,12 @@ export default function LiveResults({ testState, metrics, metricsHistory }: Live
               <div className="text-[11px] font-medium uppercase tracking-wider text-fg-3 mt-1.5">Elapsed</div>
             </div>
           </div>
+
+          {isBidirectional && (metricsHistory.length > 0 || totalUp > 0 || totalDn > 0) && (
+            <div className="rounded border border-line bg-bg px-3 py-2 text-[12px] text-fg-2">
+              Bidirectional mode reports full-duplex throughput per direction. On a 1 Gbit link, upload and download can both sit near line rate at the same time.
+            </div>
+          )}
 
           {/* Charts */}
           <div className="grid grid-cols-2 gap-4">

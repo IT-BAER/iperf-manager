@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useCallback, useMemo } from 'react'
+﻿import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import { useSocket } from './hooks/useSocket'
 import { api } from './api'
@@ -133,7 +133,7 @@ function ReportList({ onSelect }: { onSelect: (name: string) => void }) {
                   type="checkbox"
                   checked={allSelected}
                   onChange={toggleAll}
-                  className="accent-blue-500 cursor-pointer w-3.5 h-3.5"
+                  className="accent-accent cursor-pointer w-3.5 h-3.5"
                 />
               </th>
               <th className="px-3 py-2 font-medium">Date / Time</th>
@@ -159,7 +159,7 @@ function ReportList({ onSelect }: { onSelect: (name: string) => void }) {
                     type="checkbox"
                     checked={selected.has(f.name)}
                     onChange={() => {}}
-                    className="accent-blue-500 cursor-pointer w-3.5 h-3.5"
+                    className="accent-accent cursor-pointer w-3.5 h-3.5"
                   />
                 </td>
                 <td className="px-3 py-2.5 font-mono whitespace-nowrap">{fmtDateTime(f.name)}</td>
@@ -182,12 +182,12 @@ function ReportList({ onSelect }: { onSelect: (name: string) => void }) {
                   }
                 </td>
                 <td className="px-3 py-2.5 tabular-nums">{fmtDuration(f.duration_s)}</td>
-                <td className="px-3 py-2.5 tabular-nums text-green-400">{fmtMbps(f.peak_up)}</td>
-                <td className="px-3 py-2.5 tabular-nums text-blue-400">{fmtMbps(f.peak_dn)}</td>
+                <td className="px-3 py-2.5 tabular-nums text-ok">{fmtMbps(f.peak_up)}</td>
+                <td className="px-3 py-2.5 tabular-nums text-accent">{fmtMbps(f.peak_dn)}</td>
                 <td className="px-3 py-2.5 text-right text-fg-3 tabular-nums">{(f.size / 1024).toFixed(1)} KB</td>
                 <td className="px-2 py-2.5" onClick={e => e.stopPropagation()}>
                   <button
-                    className="w-6 h-6 flex items-center justify-center rounded hover:bg-red-500/10 hover:text-red-400 text-fg-3 transition-colors"
+                    className="w-6 h-6 flex items-center justify-center rounded hover:bg-err-subtle hover:text-err text-fg-3 transition-colors"
                     title="Delete"
                     onClick={e => deleteSingle(f.name, e)}
                   >
@@ -207,6 +207,7 @@ type Tab = 'test' | 'results' | 'reports'
 
 export function App() {
   const { on, connected } = useSocket()
+  const didInitializeAgents = useRef(false)
 
   // ── State ─────────────────────────────────────────────────────
   const [agents, setAgents] = useState<Agent[]>([])
@@ -303,7 +304,8 @@ export function App() {
     setAgents(prev => prev.filter(a => a.id !== id))
   }, [])
 
-  const discoverAgents = useCallback(async () => {
+  const discoverAgents = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent ?? false
     setIsDiscovering(true)
     try {
       const before = agents.length
@@ -314,6 +316,7 @@ export function App() {
           data.agents.forEach(a => map.set(a.id, a))
           return Array.from(map.values())
         })
+        if (silent) return
         const found = data.agents.length - before
         if (found > 0) {
           toast(`Discovered ${found} new agent${found !== 1 ? 's' : ''}`, 'ok')
@@ -340,7 +343,15 @@ export function App() {
   const clearLogs = useCallback(() => setLogs([]), [])
 
   // ── Initial load ──────────────────────────────────────────────
-  useEffect(() => { refreshAgents() }, [refreshAgents])
+  useEffect(() => {
+    if (didInitializeAgents.current) return
+    didInitializeAgents.current = true
+
+    void (async () => {
+      await refreshAgents()
+      await discoverAgents({ silent: true })
+    })()
+  }, [discoverAgents, refreshAgents])
 
   // ── Render ────────────────────────────────────────────────────
   return (
