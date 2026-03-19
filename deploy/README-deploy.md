@@ -21,6 +21,15 @@ curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/i
   | sudo bash -s -- --token "mySecretKey" --port 9001 --iperf-ports "5211,5212"
 ```
 
+For staged local-tree rollouts, extract the repo to `/opt/iperf-manager` first and then run:
+
+```bash
+cd /opt/iperf-manager
+sudo IPERF_MANAGER_SKIP_REPO_SYNC=1 bash deploy/install-agent-linux.sh
+```
+
+That mode keeps the staged local tree instead of resetting the host back to GitHub.
+
 ### Windows agent (PowerShell as Administrator)
 
 ```powershell
@@ -34,6 +43,14 @@ With parameters:
 ```powershell
 & $env:TEMP\Install-Agent.ps1 -Token "mySecretKey" -Port 9001 -IperfPorts "5211,5212"
 ```
+
+## Security Notes
+
+- Agent install scripts now generate a random API token when you do not pass `--token` or `-Token` explicitly.
+- Save the generated token and re-add the agent through the dashboard's manual Add Agent form with that API key so the dashboard server can refresh and control the protected agent.
+- Set an agent token with `--token` or `-Token` explicitly if you need a deterministic value for automation.
+- The web dashboard now enables built-in session authentication by default. Set `DASHBOARD_AUTH_USERNAME` plus either `DASHBOARD_AUTH_PASSWORD_HASH` or `DASHBOARD_AUTH_PASSWORD` to control the credentials, or set `DASHBOARD_AUTH_DISABLE=1` to opt out explicitly.
+- Agent and dashboard control traffic is plain HTTP by default. Use TLS termination if the traffic can cross untrusted networks.
 
 ## Manual Agent Installation
 
@@ -139,6 +156,24 @@ npm run build
 sudo bash /opt/iperf-manager/deploy/setup-web-service.sh
 ```
 
+If you do not provide dashboard auth settings, the setup script generates a random admin password on a fresh install, stores only its hash in the service, and prints the one-time password in the terminal. On later reruns, if auth settings already exist and you do not pass new ones, the script preserves the existing username and stored hash instead of rotating the password.
+
+To enable built-in dashboard authentication with a password hash:
+
+```bash
+AUTH_HASH=$(python3 -c "from werkzeug.security import generate_password_hash; print(generate_password_hash('change-me'))")
+sudo DASHBOARD_AUTH_USERNAME=admin DASHBOARD_AUTH_PASSWORD_HASH="$AUTH_HASH" SESSION_COOKIE_SECURE=1 \
+  bash /opt/iperf-manager/deploy/setup-web-service.sh
+```
+
+Set `SESSION_COOKIE_SECURE=1` when the dashboard is served over HTTPS so browsers only send the session cookie on encrypted requests.
+
+To opt out and run the dashboard without login protection:
+
+```bash
+sudo DASHBOARD_AUTH_DISABLE=1 bash /opt/iperf-manager/deploy/setup-web-service.sh
+```
+
 The generated service runs:
 
 ```bash
@@ -151,6 +186,8 @@ Verify it with:
 sudo systemctl status iperf-web
 curl -I http://127.0.0.1:5000
 ```
+
+Do not expose the dashboard directly to untrusted networks without authentication and TLS in front of it. Built-in auth protects the app session, but HTTPS is still required for untrusted networks.
 
 ## Network Ports
 
@@ -184,6 +221,7 @@ Windows agent:
 |-------|-------|
 | Agent not discovered | Confirm UDP 9999 is open and agents are on the same network segment |
 | Agent API unreachable | Check `iperf-agent` status and firewall rules for TCP 9001 |
+| `iperf-agent` exits with `226/NAMESPACE` | Rerun the updated Linux installer, or verify `/opt/iperf-manager/data` exists for the systemd `ReadWritePaths` policy |
 | Tests fail to start | Confirm `iperf3` is installed and the iperf3 ports are open between agents |
 | Web dashboard unavailable | Check `iperf-web` status and verify the frontend was built into `web/frontend/dist/` |
 | Config changes not applied | Restart the affected service after editing its config |

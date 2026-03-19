@@ -16,6 +16,15 @@ SERVICE_NAME="iperf-agent"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 REPO_URL="https://github.com/IT-BAER/iperf-manager.git"
 UNINSTALL=false
+TOKEN_GENERATED=false
+SKIP_REPO_SYNC=${IPERF_MANAGER_SKIP_REPO_SYNC:-}
+SKIP_REPO_SYNC_FLAG=false
+
+case "${SKIP_REPO_SYNC,,}" in
+    1|true|yes|on)
+        SKIP_REPO_SYNC_FLAG=true
+        ;;
+esac
 
 # ── Colors ───────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -149,9 +158,18 @@ if [[ -z "$PYTHON_BIN" ]]; then
 fi
 ok "Python found: $PYTHON_BIN ($PY_VER)"
 
+if [[ -z "$API_TOKEN" ]]; then
+    API_TOKEN=$($PYTHON_BIN -c 'import secrets; print(secrets.token_hex(32))')
+    TOKEN_GENERATED=true
+    ok "Generated API token automatically"
+fi
+
 # ── 3. Clone or update repository ───────────────────────────────────
 info "Setting up repository in ${INSTALL_DIR} …"
-if [[ -d "${INSTALL_DIR}/.git" ]]; then
+if $SKIP_REPO_SYNC_FLAG; then
+    [[ -f "${INSTALL_DIR}/main_agent.py" ]] || die "IPERF_MANAGER_SKIP_REPO_SYNC=1 requires an existing repo checkout in ${INSTALL_DIR}"
+    ok "Using existing repository tree in ${INSTALL_DIR} without git sync"
+elif [[ -d "${INSTALL_DIR}/.git" ]]; then
     info "Repository exists – pulling latest changes …"
     git -C "$INSTALL_DIR" fetch --quiet origin
     git -C "$INSTALL_DIR" reset --hard origin/main --quiet 2>/dev/null \
@@ -172,6 +190,7 @@ fi
 info "Writing configuration …"
 mkdir -p "${CONFIG_DIR}/iperf3-agent"
 mkdir -p "${LOG_DIR}"
+mkdir -p "${INSTALL_DIR}/data"
 
 # The agent reads config from $LOCALAPPDATA/iperf3-agent/config.json
 # We set LOCALAPPDATA=/etc/iperf-manager in the service unit so the
@@ -275,10 +294,17 @@ echo -e "  Service name      : ${CYAN}${SERVICE_NAME}${NC}"
 echo -e "  API port          : ${CYAN}${API_PORT}/tcp${NC}"
 echo -e "  Discovery port    : ${CYAN}9999/udp${NC}"
 echo -e "  iperf3 ports      : ${CYAN}${IPERF_PORTS}${NC}"
-if [[ -n "$API_TOKEN" ]]; then
-    echo -e "  API token         : ${CYAN}(configured)${NC}"
+if $TOKEN_GENERATED; then
+    echo -e "  API token         : ${YELLOW}${API_TOKEN}${NC}"
+    echo -e "  Token source      : ${YELLOW}generated automatically${NC}"
+else
+    echo -e "  API token         : ${CYAN}(provided)${NC}"
 fi
 echo ""
+
+if $TOKEN_GENERATED; then
+    warn "Save this token now. Use it when manually adding the agent in the dashboard so the server can refresh and control the agent securely."
+fi
 
 # Show service status
 info "Service status:"

@@ -47,6 +47,7 @@ $RepoUrl        = "https://github.com/IT-BAER/iperf-manager.git"
 $Iperf3Dir      = Join-Path $InstallDir "iperf3"
 $FwRulePrefix   = "iperf-manager"
 $Iperf3Release  = "https://api.github.com/repos/ar51an/iperf3-win-builds/releases/latest"
+$TokenGenerated = $false
 
 # ── Helpers ──────────────────────────────────────────────────────────
 function Write-Step  { param([string]$Msg) Write-Host "[INFO]  $Msg" -ForegroundColor Cyan }
@@ -146,6 +147,16 @@ if (-not $PythonBin) {
     exit 1
 }
 Write-Ok "Python found: $PythonBin ($pyMajor.$pyMinor)"
+
+if (-not $Token) {
+    $bytes = New-Object byte[] 32
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    $rng.GetBytes($bytes)
+    $rng.Dispose()
+    $Token = -join ($bytes | ForEach-Object { $_.ToString('x2') })
+    $TokenGenerated = $true
+    Write-Ok "Generated API token automatically"
+}
 
 # ── 2. Install iperf3 ───────────────────────────────────────────────
 Write-Step "Checking iperf3 ..."
@@ -436,10 +447,17 @@ Write-Host "  Scheduled task    : $TaskName" -ForegroundColor Cyan
 Write-Host "  API port          : ${Port}/tcp" -ForegroundColor Cyan
 Write-Host "  Discovery port    : 9999/udp" -ForegroundColor Cyan
 Write-Host "  iperf3 ports      : $IperfPorts" -ForegroundColor Cyan
-if ($Token) {
-    Write-Host "  API token         : (configured)" -ForegroundColor Cyan
+if ($TokenGenerated) {
+    Write-Host "  API token         : $Token" -ForegroundColor Yellow
+    Write-Host "  Token source      : generated automatically" -ForegroundColor Yellow
+} else {
+    Write-Host "  API token         : (provided)" -ForegroundColor Cyan
 }
 Write-Host ""
+if ($TokenGenerated) {
+    Write-Warn "Save this token now. Use it when manually adding the agent in the dashboard so the server can refresh and control the agent securely."
+    Write-Host ""
+}
 Write-Host "  Verify with:" -ForegroundColor Yellow
 Write-Host "    curl http://localhost:${Port}/status" -ForegroundColor White
 Write-Host "    Invoke-RestMethod http://localhost:${Port}/status" -ForegroundColor White

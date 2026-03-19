@@ -25,6 +25,8 @@ data/*.csv
 data/*.log
 data/*.html
 data/*.png
+data/.dashboard/
+data/deployment-rollout-*.md
 
 # iperf3 binaries (download separately)
 iperf3.exe

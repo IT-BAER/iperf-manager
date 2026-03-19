@@ -2,6 +2,5 @@
 # Web dashboard:
 flask>=3.0
 flask-socketio>=5.3
-eventlet>=0.35
 # Report generation (optional):
 matplotlib>=3.5

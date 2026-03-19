@@ -5,7 +5,7 @@ interface Props {
   open: boolean
   agents: Agent[]
   onRefresh: () => void
-  onAdd: (url: string, name: string) => void
+  onAdd: (url: string, name: string, apiKey: string) => void
   onRemove: (id: string) => void
   onDiscover: () => void
   isDiscovering?: boolean
@@ -29,13 +29,15 @@ function RefreshIcon() {
 export function Sidebar({ open, agents, onRefresh, onAdd, onRemove, onDiscover, isDiscovering, isRefreshing }: Props) {
   const [addUrl, setAddUrl] = useState('')
   const [addName, setAddName] = useState('')
+  const [addApiKey, setAddApiKey] = useState('')
   const [showAdd, setShowAdd] = useState(false)
 
   const handleAdd = () => {
     if (!addUrl.trim()) return
-    onAdd(addUrl.trim(), addName.trim() || addUrl.trim())
+    onAdd(addUrl.trim(), addName.trim() || addUrl.trim(), addApiKey.trim())
     setAddUrl('')
     setAddName('')
+    setAddApiKey('')
     setShowAdd(false)
   }
 
@@ -82,25 +84,48 @@ export function Sidebar({ open, agents, onRefresh, onAdd, onRemove, onDiscover, 
 
       <div className={`collapsible-grid ${showAdd ? 'open' : 'closed'}`}>
         <div className="collapsible-inner">
-          <div className="p-3 border-b border-line bg-surface-raised space-y-2">
+          <form
+            className="p-3 border-b border-line bg-surface-raised space-y-2"
+            onSubmit={event => {
+              event.preventDefault()
+              handleAdd()
+            }}
+          >
             <input
               className="input-base"
+              name="agentUrl"
+              aria-label="Agent URL"
+              autoComplete="url"
               placeholder="http://host:9001"
               value={addUrl}
               onChange={e => setAddUrl(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleAdd()}
             />
             <input
               className="input-base"
+              name="agentName"
+              aria-label="Agent display name"
+              autoComplete="off"
               placeholder="Display name (optional)"
               value={addName}
               onChange={e => setAddName(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleAdd()}
             />
-            <button onClick={handleAdd} className="btn btn-primary btn-sm w-full">
+            <input
+              className="input-base"
+              type="password"
+              autoComplete="new-password"
+              name="agentApiKey"
+              aria-label="Agent API key"
+              placeholder="Agent API key (optional)"
+              value={addApiKey}
+              onChange={e => setAddApiKey(e.target.value)}
+            />
+            <div className="text-[11px] text-fg-3 leading-relaxed">
+              Use this to store an agent key on the dashboard server without exposing it back to the browser.
+            </div>
+            <button type="submit" className="btn btn-primary btn-sm w-full">
               Add Agent
             </button>
-          </div>
+          </form>
         </div>
       </div>
 

@@ -54,6 +54,10 @@ function fmtSpeed(mbps: number): string {
   return '0'
 }
 
+function metricClientKey(row: ClientRow): string {
+  return row.name.trim() || row.agent
+}
+
 /* ── main component ──────────────────────────────────────── */
 export default function TopologyDiagram({
   agents, config, isRunning, latestMetrics,
@@ -141,7 +145,7 @@ export default function TopologyDiagram({
         </defs>
         {lines.map((l, i) => {
           const row = config.clients[i]
-          const cm = row && latestMetrics?.clients[row.name]
+          const cm = row && latestMetrics?.clients[metricClientKey(row)]
           const active = isRunning && cm && (cm.up > 0 || cm.dn > 0)
           return (
             <g key={i}>
@@ -307,7 +311,7 @@ export default function TopologyDiagram({
               {config.clients.map((row, i) => {
                 const ca = agents[row.agent]
                 const cIfaces = getInterfaces(ca)
-                const cm = latestMetrics?.clients[row.name]
+                const cm = latestMetrics?.clients[metricClientKey(row)]
                 const clientActive = isRunning && cm && (cm.up > 0 || cm.dn > 0)
                 return (
                   <div
