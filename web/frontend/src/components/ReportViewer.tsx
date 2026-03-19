@@ -12,6 +12,7 @@ import {
 } from 'chart.js'
 import { Line } from 'react-chartjs-2'
 import type { ChartData, ChartOptions } from 'chart.js'
+import { api } from '../api'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler)
 
@@ -45,12 +46,12 @@ export default function ReportViewer({ filename, onBack }: ReportViewerProps) {
   useEffect(() => {
     setLoading(true)
     setError(null)
-    fetch(`/api/reports/${encodeURIComponent(filename)}/data`)
-      .then(r => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.json()
-      })
-      .then((data: { columns: string[]; rows: Record<string, string>[] }) => {
+    api<{ columns: string[]; rows: Record<string, string>[] }>(`/api/reports/${encodeURIComponent(filename)}/data`)
+      .then(data => {
+        if (!data) {
+          setError('Failed to load report')
+          return
+        }
         setColumns(data.columns)
         setRows(data.rows)
         setSortCol(data.columns[0] ?? '')

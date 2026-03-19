@@ -7,15 +7,19 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import hmac
 import io
 import json
 import os
 import socket
 import threading
 import time
+from datetime import timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 
-from flask import Flask, jsonify, render_template, request, send_from_directory, abort
+from flask import Flask, jsonify, render_template, request, send_from_directory, abort, session
+from werkzeug.security import check_password_hash
 
 try:
     from flask_socketio import SocketIO, emit
@@ -34,10 +38,24 @@ from core.constants import (
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 PROFILES_DIR = DATA_DIR / "profiles"
+PRIVATE_STATE_DIR = DATA_DIR / ".dashboard"
+AGENTS_STATE_FILE = PRIVATE_STATE_DIR / "agents.json"
 PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+PRIVATE_STATE_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── Flask / Socket.IO setup ─────────────────────────────────────────────
 import secrets
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, "").strip() or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 app = Flask(
     __name__,
@@ -45,13 +63,35 @@ app = Flask(
     static_folder=str(Path(__file__).resolve().parent / "static"),
 )
 app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET") or secrets.token_hex(32)
+app.config["SESSION_COOKIE_NAME"] = "iperf_manager_session"
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Strict"
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SESSION_COOKIE_SECURE", "").strip().lower() in {
+    "1", "true", "yes", "on",
+}
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(
+    hours=max(1, _env_int("DASHBOARD_AUTH_SESSION_HOURS", 12))
+)
 
 _cors_origins = os.environ.get("CORS_ORIGINS", "").strip()
-socketio = SocketIO(
-    app,
-    cors_allowed_origins=_cors_origins.split(",") if _cors_origins else "*",
-    async_mode="threading",
-)
+_socketio_kwargs: dict[str, object] = {"async_mode": "threading"}
+if _cors_origins:
+    _socketio_kwargs["cors_allowed_origins"] = [
+        origin.strip() for origin in _cors_origins.split(",") if origin.strip()
+    ]
+socketio = SocketIO(app, **_socketio_kwargs)
+
+_AUTH_DISABLED = _env_flag("DASHBOARD_AUTH_DISABLE")
+_AUTH_USERNAME = os.environ.get("DASHBOARD_AUTH_USERNAME", "").strip() or "admin"
+_AUTH_PASSWORD = os.environ.get("DASHBOARD_AUTH_PASSWORD", "")
+_AUTH_PASSWORD_HASH = os.environ.get("DASHBOARD_AUTH_PASSWORD_HASH", "")
+_AUTH_GENERATED_PASSWORD = ""
+if not _AUTH_DISABLED and not (_AUTH_PASSWORD_HASH or _AUTH_PASSWORD):
+    _AUTH_GENERATED_PASSWORD = secrets.token_urlsafe(18)
+    _AUTH_PASSWORD = _AUTH_GENERATED_PASSWORD
+_LOGIN_WINDOW_SEC = max(60, _env_int("DASHBOARD_AUTH_RATE_WINDOW_SEC", 900))
+_LOGIN_MAX_ATTEMPTS = max(1, _env_int("DASHBOARD_AUTH_MAX_ATTEMPTS", 5))
+_LOGIN_FAILURES: dict[str, list[float]] = {}
 
 # ── In-memory state ─────────────────────────────────────────────────────
 _agents: dict[str, dict] = {}          # {agent_id: {url, name, status, last_seen}}
@@ -72,6 +112,246 @@ _current_csv: str | None = None
 def _agent_id(url: str) -> str:
     """Deterministic short ID from agent URL."""
     return hashlib.md5(url.encode()).hexdigest()[:10]
+
+
+def _dashboard_auth_enabled() -> bool:
+    """Return True when dashboard login is enabled."""
+    return not _AUTH_DISABLED
+
+
+def auth_bootstrap_summary() -> str:
+    """Describe the effective dashboard authentication mode for startup logs."""
+    if not _dashboard_auth_enabled():
+        return "[iperf-manager] Dashboard auth disabled via DASHBOARD_AUTH_DISABLE"
+    if _AUTH_GENERATED_PASSWORD:
+        return (
+            "[iperf-manager] Dashboard auth enabled with generated credentials: "
+            f"username={_AUTH_USERNAME} password={_AUTH_GENERATED_PASSWORD}"
+        )
+    return f"[iperf-manager] Dashboard auth enabled for username={_AUTH_USERNAME}"
+
+
+def _dashboard_request_authenticated() -> bool:
+    """Return True for authenticated dashboard sessions or when auth is disabled."""
+    if not _dashboard_auth_enabled():
+        return True
+    if not session.get("auth_ok"):
+        return False
+    return hmac.compare_digest(str(session.get("auth_user", "") or ""), _AUTH_USERNAME)
+
+
+def _client_ip() -> str:
+    """Resolve the client IP, honoring reverse proxy forwarding when present."""
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if forwarded:
+        return forwarded.split(",", 1)[0].strip() or "unknown"
+    return request.remote_addr or "unknown"
+
+
+def _recent_login_failures(client_ip: str) -> list[float]:
+    """Return recent failed login timestamps for the client."""
+    now = time.time()
+    attempts = [
+        ts for ts in _LOGIN_FAILURES.get(client_ip, [])
+        if now - ts < _LOGIN_WINDOW_SEC
+    ]
+    if attempts:
+        _LOGIN_FAILURES[client_ip] = attempts
+    else:
+        _LOGIN_FAILURES.pop(client_ip, None)
+    return attempts
+
+
+def _record_login_failure(client_ip: str):
+    """Track a failed login attempt for basic in-memory rate limiting."""
+    attempts = _recent_login_failures(client_ip)
+    attempts.append(time.time())
+    _LOGIN_FAILURES[client_ip] = attempts
+
+
+def _clear_login_failures(client_ip: str):
+    """Clear recorded login failures after a successful authentication."""
+    _LOGIN_FAILURES.pop(client_ip, None)
+
+
+def _verify_dashboard_password(password: str) -> bool:
+    """Verify the submitted dashboard password against the configured secret."""
+    if _AUTH_PASSWORD_HASH:
+        try:
+            return check_password_hash(_AUTH_PASSWORD_HASH, password)
+        except ValueError:
+            return False
+    return hmac.compare_digest(password, _AUTH_PASSWORD)
+
+
+def _auth_state() -> dict:
+    """Serialize the current dashboard authentication state for the SPA."""
+    authenticated = _dashboard_request_authenticated()
+    return {
+        "enabled": _dashboard_auth_enabled(),
+        "authenticated": authenticated,
+        "username": _AUTH_USERNAME if authenticated else "",
+    }
+
+
+def _normalize_agent_url(url: str) -> str:
+    """Validate and normalize a manually added agent base URL."""
+    raw = url.strip().rstrip("/")
+    parsed = urlparse(raw)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("agent url must start with http:// or https://")
+    if not parsed.hostname:
+        raise ValueError("agent url must include a hostname")
+    if parsed.username or parsed.password:
+        raise ValueError("agent url must not include credentials")
+    if parsed.path not in ("", "/") or parsed.query or parsed.fragment:
+        raise ValueError("agent url must not include a path, query, or fragment")
+
+    host = parsed.hostname
+    if host and ":" in host:
+        host = f"[{host}]"
+
+    normalized = f"{parsed.scheme}://{host}"
+    if parsed.port:
+        normalized += f":{parsed.port}"
+    return normalized
+
+
+def _save_agents_state():
+    """Persist dashboard-managed agent settings, including stored API keys."""
+    with _agents_lock:
+        snapshot = [
+            {
+                "url": info.get("url", ""),
+                "name": info.get("name", ""),
+                "api_key": info.get("api_key", ""),
+            }
+            for info in _agents.values()
+            if info.get("url")
+        ]
+
+    tmp_path = AGENTS_STATE_FILE.with_suffix(".json.tmp")
+    try:
+        tmp_path.write_text(json.dumps(snapshot, indent=2), encoding="utf-8")
+        try:
+            tmp_path.chmod(0o600)
+        except OSError:
+            pass
+        tmp_path.replace(AGENTS_STATE_FILE)
+        try:
+            AGENTS_STATE_FILE.chmod(0o600)
+        except OSError:
+            pass
+    except Exception:
+        pass
+
+
+def _load_agents_state():
+    """Restore dashboard-managed agent settings from the private runtime state file."""
+    try:
+        raw = json.loads(AGENTS_STATE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    if not isinstance(raw, list):
+        return
+
+    restored: dict[str, dict] = {}
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        try:
+            url = _normalize_agent_url(str(item.get("url", "")))
+        except ValueError:
+            continue
+        aid = _agent_id(url)
+        restored[aid] = {
+            "id": aid,
+            "url": url,
+            "name": str(item.get("name", "")).strip() or url,
+            "status": "unknown",
+            "last_seen": None,
+            "api_key": str(item.get("api_key", "") or "").strip(),
+            "details": {},
+        }
+
+    with _agents_lock:
+        _agents.update(restored)
+
+
+def _public_agent(info: dict) -> dict:
+    """Remove secret fields before returning agent data to the browser."""
+    public = dict(info)
+    public.pop("api_key", None)
+    details = public.get("details")
+    if isinstance(details, dict):
+        public["details"] = {
+            key: details[key]
+            for key in ("version", "ips", "interfaces")
+            if key in details
+        }
+    return public
+
+
+def _public_test_config(config: dict | None) -> dict | None:
+    """Redact agent API keys from test config data sent to the browser."""
+    if not isinstance(config, dict):
+        return None
+
+    public = dict(config)
+    public["api_key"] = ""
+    public["clients"] = [
+        {**client, "api_key": ""} if isinstance(client, dict) else client
+        for client in config.get("clients", [])
+    ]
+    return public
+
+
+def _public_test_state(state: dict) -> dict:
+    """Return a browser-safe snapshot of current test state."""
+    public = dict(state)
+    if "config" in public:
+        public["config"] = _public_test_config(public.get("config"))
+    return public
+
+
+def _redact_profile_config(config: dict | None) -> dict | None:
+    """Strip secrets before writing profiles to disk."""
+    if not isinstance(config, dict):
+        return None
+    return _public_test_config(config)
+
+
+_load_agents_state()
+
+
+@app.before_request
+def _require_dashboard_auth():
+    """Enforce session auth for dashboard API routes when configured."""
+    if not _dashboard_auth_enabled():
+        return None
+
+    path = request.path or "/"
+    if path == "/" or path == "/favicon.ico" or path.startswith("/assets/"):
+        return None
+    if path == "/api/auth/session":
+        return None
+    if _dashboard_request_authenticated():
+        return None
+    if path.startswith("/api/"):
+        return jsonify({"error": "authentication required"}), 401
+    abort(401)
+
+
+@app.after_request
+def _apply_security_headers(response):
+    """Apply conservative browser-facing security headers."""
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    if request.path == "/api/auth/session":
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
+    return response
 
 
 def _check_agent(url: str, api_key: str = "") -> dict | None:
@@ -150,31 +430,35 @@ def _normalize_config(raw: dict) -> dict:
     """Transform frontend config shape into the format run_test expects."""
     server_id = raw.get("server_agent", "")
     server_url = _resolve_agent_url(server_id) if server_id else ""
+    with _agents_lock:
+        agent_snapshot = {aid: dict(info) for aid, info in _agents.items()}
 
     # Derive server IP from its URL for default client target
     server_ip = ""
     if server_url:
         try:
-            from urllib.parse import urlparse
             server_ip = urlparse(server_url).hostname or ""
         except Exception:
             pass
 
     # Resolve server display name from agents dict
-    with _agents_lock:
-        server_name = _agents[server_id]["name"] if server_id in _agents else server_id
+    server_info = agent_snapshot.get(server_id, {})
+    server_name = server_info.get("name", server_id)
+    server_api_key = str(server_info.get("api_key", "") or "")
 
     mode = _MODE_MAP.get(raw.get("mode", ""), raw.get("mode", ""))
 
     clients = []
     for c in raw.get("clients", []):
         agent_id = c.get("agent", "")
+        agent_info = agent_snapshot.get(agent_id, {})
+        agent_api_key = str(agent_info.get("api_key", "") or "")
         target = c.get("server_target") or c.get("target", "") or server_ip
         client_entry: dict = {
             "agent": _resolve_agent_url(agent_id) if agent_id else "",
             "name": c.get("name") or agent_id,
             "target": target,
-            "api_key": c.get("api_key", ""),
+            "api_key": c.get("api_key", "") or agent_api_key,
         }
         if c.get("bind"):
             client_entry["bind"] = c["bind"]
@@ -185,7 +469,7 @@ def _normalize_config(raw: dict) -> dict:
             "agent": server_url,
             "name": server_name,
             "bind": raw.get("server_bind", ""),
-            "api_key": raw.get("api_key", ""),
+            "api_key": raw.get("api_key", "") or server_api_key,
         },
         "clients": clients,
         "duration_sec": raw.get("duration_sec", 10),
@@ -276,7 +560,7 @@ def _run_test_thread(config: dict):
 
     socketio.emit("test_started", {
         "ts": time.time(),
-        "config": config,
+        "config": _public_test_config(config),
         "csv": csv_name,
     })
 
@@ -356,6 +640,59 @@ def serve_assets(filename):
     return send_from_directory(str(_FRONTEND_DIST / "assets"), filename)
 
 
+@app.route("/favicon.ico")
+def favicon():
+    """Serve a favicon when present, or return no content without logging a 404."""
+    icon_path = Path(__file__).resolve().parent / "static" / "favicon.ico"
+    if icon_path.is_file():
+        return send_from_directory(str(icon_path.parent), icon_path.name)
+    return ("", 204)
+
+
+# ╔══════════════════════════════════════════════════════════════════════╗
+# ║  Routes – Authentication                                            ║
+# ╚══════════════════════════════════════════════════════════════════════╝
+
+@app.route("/api/auth/session", methods=["GET"])
+def auth_session_status():
+    return jsonify(_auth_state())
+
+
+@app.route("/api/auth/session", methods=["POST"])
+def create_auth_session():
+    if not _dashboard_auth_enabled():
+        return jsonify({"error": "dashboard auth is not enabled"}), 400
+
+    client_ip = _client_ip()
+    if len(_recent_login_failures(client_ip)) >= _LOGIN_MAX_ATTEMPTS:
+        return jsonify({"error": "too many login attempts; try again later"}), 429
+
+    body = request.get_json(silent=True) or {}
+    username = str(body.get("username", "") or "").strip()
+    password = str(body.get("password", "") or "")
+
+    if (
+        not username or not password
+        or not hmac.compare_digest(username, _AUTH_USERNAME)
+        or not _verify_dashboard_password(password)
+    ):
+        _record_login_failure(client_ip)
+        return jsonify({"error": "invalid credentials"}), 401
+
+    _clear_login_failures(client_ip)
+    session.clear()
+    session.permanent = True
+    session["auth_ok"] = True
+    session["auth_user"] = _AUTH_USERNAME
+    return jsonify(_auth_state())
+
+
+@app.route("/api/auth/session", methods=["DELETE"])
+def delete_auth_session():
+    session.clear()
+    return jsonify(_auth_state())
+
+
 # ╔══════════════════════════════════════════════════════════════════════╗
 # ║  Routes – Agents                                                    ║
 # ╚══════════════════════════════════════════════════════════════════════╝
@@ -370,22 +707,26 @@ def list_agents():
             _refresh_agent(aid, info)
         with _agents_lock:
             agents = dict(_agents)
-    return jsonify(list(agents.values()))
+    return jsonify([_public_agent(info) for info in agents.values()])
 
 
 @app.route("/api/agents", methods=["POST"])
 def add_agent():
     data = request.get_json(force=True)
-    url = data.get("url", "").strip().rstrip("/")
-    if not url:
-        return jsonify({"error": "url is required"}), 400
-    name = data.get("name", "").strip() or url
-    api_key = data.get("api_key", "")
+    try:
+        url = _normalize_agent_url(data.get("url", ""))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     aid = _agent_id(url)
+    with _agents_lock:
+        existing = dict(_agents.get(aid, {}))
+    name = data.get("name", "").strip() or existing.get("name") or url
+    api_key = str(data.get("api_key", "") or existing.get("api_key", "")).strip()
     info = {"id": aid, "url": url, "name": name, "status": "unknown",
-            "last_seen": None, "api_key": api_key, "details": {}}
+            "last_seen": existing.get("last_seen"), "api_key": api_key, "details": existing.get("details", {})}
     _refresh_agent(aid, info)
-    return jsonify(info), 201
+    _save_agents_state()
+    return jsonify(_public_agent(info)), 201
 
 
 @app.route("/api/agents/<agent_id>", methods=["DELETE"])
@@ -393,6 +734,7 @@ def remove_agent(agent_id):
     with _agents_lock:
         removed = _agents.pop(agent_id, None)
     if removed:
+        _save_agents_state()
         return jsonify({"ok": True})
     return jsonify({"error": "not found"}), 404
 
@@ -404,14 +746,23 @@ def discover_agents():
     found = _discover_agents(timeout=timeout)
     added = []
     for f in found:
-        aid = _agent_id(f["url"])
-        info = {"id": aid, "url": f["url"], "name": f.get("name", f["url"]),
+        try:
+            url = _normalize_agent_url(f["url"])
+        except ValueError:
+            continue
+        aid = _agent_id(url)
+        with _agents_lock:
+            existing = dict(_agents.get(aid, {}))
+        info = {"id": aid, "url": url, "name": existing.get("name") or f.get("name", url),
                 "status": "online", "last_seen": time.time(),
-                "api_key": "", "details": {"version": f.get("version"), "ips": f.get("ips"), "interfaces": f.get("interfaces")}}
+                "api_key": str(existing.get("api_key", "") or ""),
+                "details": {"version": f.get("version"), "ips": f.get("ips"), "interfaces": f.get("interfaces")}}
         with _agents_lock:
             _agents[aid] = info
-        added.append(info)
-    return jsonify({"discovered": len(found), "agents": added})
+        added.append(_public_agent(info))
+    if added:
+        _save_agents_state()
+    return jsonify({"discovered": len(added), "agents": added})
 
 
 # ╔══════════════════════════════════════════════════════════════════════╗
@@ -433,11 +784,14 @@ def save_profile():
     config = data.get("config")
     if not name or config is None:
         return jsonify({"error": "name and config are required"}), 400
+    if not isinstance(config, dict):
+        return jsonify({"error": "config must be an object"}), 400
     safe_name = "".join(c for c in name if c.isalnum() or c in "._- ").strip()
     if not safe_name:
         return jsonify({"error": "invalid profile name"}), 400
     path = PROFILES_DIR / f"{safe_name}.json"
-    path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+    safe_config = _redact_profile_config(config)
+    path.write_text(json.dumps(safe_config, indent=2), encoding="utf-8")
     return jsonify({"ok": True, "name": safe_name})
 
 
@@ -479,12 +833,17 @@ def start_test():
     config = request.get_json(force=True)
     if not config:
         return jsonify({"error": "config required"}), 400
+    if not str(config.get("server_agent", "") or "").strip():
+        return jsonify({"error": "server agent required"}), 400
+    clients = config.get("clients")
+    if not isinstance(clients, list) or not clients:
+        return jsonify({"error": "at least one client agent is required"}), 400
 
     _stop_event.clear()
     with _test_lock:
         _test_state["status"] = "running"
         _test_state["started_at"] = time.time()
-        _test_state["config"] = config
+        _test_state["config"] = _public_test_config(config)
 
     _test_thread = threading.Thread(target=_run_test_thread, args=(config,), daemon=True)
     _test_thread.start()
@@ -504,7 +863,7 @@ def stop_test():
 @app.route("/api/test/status", methods=["GET"])
 def test_status():
     with _test_lock:
-        return jsonify(dict(_test_state))
+        return jsonify(_public_test_state(dict(_test_state)))
 
 
 # ╔══════════════════════════════════════════════════════════════════════╗
@@ -693,8 +1052,10 @@ def meta():
 
 @socketio.on("connect")
 def handle_connect():
+    if not _dashboard_request_authenticated():
+        return False
     with _test_lock:
-        emit("status", {"test": dict(_test_state)})
+        emit("status", {"test": _public_test_state(dict(_test_state))})
 
 
 @socketio.on("ping_agents")
@@ -705,4 +1066,4 @@ def handle_ping_agents():
     for aid, info in agents.items():
         _refresh_agent(aid, info)
     with _agents_lock:
-        emit("agents_update", list(_agents.values()))
+        emit("agents_update", [_public_agent(info) for info in _agents.values()])

@@ -6,6 +6,8 @@ interface Props {
   onToggleSidebar: () => void
   activeTab: string
   onTabChange: (tab: 'test' | 'results' | 'reports') => void
+  authUser?: string
+  onLogout?: () => void
 }
 
 const TABS = [
@@ -13,7 +15,7 @@ const TABS = [
   { id: 'reports' as const, label: 'Reports' },
 ] as const
 
-export function Header({ connected, sidebarOpen, onToggleSidebar, activeTab, onTabChange }: Props) {
+export function Header({ connected, sidebarOpen, onToggleSidebar, activeTab, onTabChange, authUser, onLogout }: Props) {
   const navRef = useRef<HTMLElement | null>(null)
   const tabRefs = useRef<Array<HTMLSpanElement | null>>([])
   const [indicator, setIndicator] = useState({ left: 0, width: 0, opacity: 0 })
@@ -88,6 +90,15 @@ export function Header({ connected, sidebarOpen, onToggleSidebar, activeTab, onT
       </nav>
 
       <div className="flex-1" />
+
+      {authUser && onLogout && (
+        <>
+          <span className="text-[11px] text-fg-3 mr-1">{authUser}</span>
+          <button onClick={onLogout} className="btn btn-sm">
+            Sign out
+          </button>
+        </>
+      )}
 
       <span className={`w-2 h-2 rounded-full ${connected ? 'bg-ok' : 'bg-err'}`} />
       <span className="text-[11px] text-fg-3">
