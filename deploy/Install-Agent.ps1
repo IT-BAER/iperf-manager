@@ -76,7 +76,7 @@ if ($Uninstall) {
 
     # Stop running agent processes
     $agentProcs = Get-Process -Name "python*" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -like "*main_agent*--headless*" }
+        Where-Object { $_.CommandLine -like "*main_agent.py*" }
     foreach ($proc in $agentProcs) {
         Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
         Write-Ok "Stopped agent process (PID $($proc.Id))"
@@ -292,10 +292,10 @@ if ($existingTask) {
 # Use the python executable resolved earlier; handle "py -3" specially
 if ($PythonBin -eq "py -3") {
     $exePath  = "py"
-    $argList  = "-3 `"$InstallDir\main_agent.py`" --headless"
+    $argList  = "-3 `"$InstallDir\main_agent.py`""
 } else {
     $exePath  = $PythonBin
-    $argList  = "`"$InstallDir\main_agent.py`" --headless"
+    $argList  = "`"$InstallDir\main_agent.py`""
 }
 
 # Build environment variables string for the action
@@ -344,7 +344,7 @@ if ($Token) {
 $wrapperScript = Join-Path $InstallDir "start-agent.cmd"
 $wrapperContent = @"
 @echo off
-REM iperf-manager agent launcher - sets environment and starts headless agent
+REM iperf-manager agent launcher - sets environment and starts the agent
 set "LOCALAPPDATA=$InstallDir\config"
 set "AGENT_LOGDIR=$LogDir"
 "@

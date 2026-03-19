@@ -1,73 +1,71 @@
-# React + TypeScript + Vite
+# iperf-manager Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This directory contains the React 19 + TypeScript + Vite frontend for the iperf-manager web dashboard.
 
-Currently, two official plugins are available:
+## Stack
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- React 19
+- TypeScript 5
+- Vite 8
+- Tailwind CSS 3
+- Chart.js + react-chartjs-2
+- Socket.IO client
+- Font Awesome 7
 
-## React Compiler
+## Commands
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Install dependencies:
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Start the Vite development server:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm run dev
 ```
+
+Build the production bundle:
+
+```bash
+npm run build
+```
+
+Run ESLint:
+
+```bash
+npm run lint
+```
+
+Preview the built bundle:
+
+```bash
+npm run preview
+```
+
+## Runtime Notes
+
+- The built output goes to `web/frontend/dist/`.
+- Flask serves that `dist/` bundle when it exists.
+- If `dist/` is missing, the backend falls back to the legacy `templates/dashboard.html` implementation.
+- On a fresh page load, the sidebar performs one silent auto-discovery pass before the manual Discover button becomes idle again.
+
+## Key Files
+
+| Path | Purpose |
+|------|---------|
+| `src/App.tsx` | App shell, reports list, agent discovery and refresh wiring |
+| `src/components/TestConfig.tsx` | Test configuration panel and topology integration |
+| `src/components/TopologyDiagram.tsx` | Server/client topology and live connection visuals |
+| `src/components/LiveResults.tsx` | Live KPI cards and charts |
+| `src/components/ReportViewer.tsx` | Inline CSV report viewer |
+| `src/components/Sidebar.tsx` | Agent list, discovery, refresh, manual add |
+| `src/index.css` | Shared component classes and dashboard styling |
+| `tailwind.config.js` | Theme tokens used throughout the UI |
+
+## Integration Points
+
+- REST API calls go through `src/api.ts`.
+- Live updates come from `src/hooks/useSocket.ts`.
+- The frontend talks to Flask routes under `/api/*` and receives Socket.IO events such as `status`, `metrics`, `test_started`, `test_completed`, and `agents_update`.
