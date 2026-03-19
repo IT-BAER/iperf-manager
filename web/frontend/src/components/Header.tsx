@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from 'react'
+
 interface Props {
   connected: boolean
   sidebarOpen: boolean
@@ -12,6 +14,37 @@ const TABS = [
 ] as const
 
 export function Header({ connected, sidebarOpen, onToggleSidebar, activeTab, onTabChange }: Props) {
+  const navRef = useRef<HTMLElement | null>(null)
+  const tabRefs = useRef<Array<HTMLSpanElement | null>>([])
+  const [indicator, setIndicator] = useState({ left: 0, width: 0, opacity: 0 })
+
+  useEffect(() => {
+    const updateIndicator = () => {
+      const activeIndex = TABS.findIndex(tab => tab.id === activeTab)
+      const nav = navRef.current
+      const activeEl = tabRefs.current[activeIndex]
+      if (!nav || !activeEl) return
+
+      const navRect = nav.getBoundingClientRect()
+      const activeRect = activeEl.getBoundingClientRect()
+      setIndicator({
+        left: activeRect.left - navRect.left,
+        width: activeRect.width,
+        opacity: 1,
+      })
+    }
+
+    updateIndicator()
+
+    const nav = navRef.current
+    if (!nav) return
+
+    const observer = new ResizeObserver(updateIndicator)
+    observer.observe(nav)
+
+    return () => observer.disconnect()
+  }, [activeTab])
+
   return (
     <header className="h-11 shrink-0 border-b border-line bg-surface flex items-center px-3 gap-3">
       <button
@@ -26,20 +59,32 @@ export function Header({ connected, sidebarOpen, onToggleSidebar, activeTab, onT
         iperf-manager
       </h1>
 
-      <nav className="flex gap-1 ml-4">
-        {TABS.map(tab => (
+      <nav ref={navRef} className="relative flex gap-1 ml-4 self-stretch">
+        {TABS.map((tab, index) => (
           <button
             key={tab.id}
             onClick={() => onTabChange(tab.id)}
-            className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
-              activeTab === tab.id
-                ? 'bg-accent/15 text-accent'
-                : 'text-fg-3 hover:text-fg hover:bg-surface-hover'
+            className={`h-full px-1 transition-colors ${
+              activeTab === tab.id ? 'text-fg' : 'text-fg-3 hover:text-fg'
             }`}
           >
-            {tab.label}
+            <span
+              ref={el => { tabRefs.current[index] = el }}
+              className="inline-flex h-full items-center px-4 pt-0.5 text-[14px] font-semibold"
+            >
+              {tab.label}
+            </span>
           </button>
         ))}
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute bottom-0 h-0.5 rounded-full bg-tab-active transition-[transform,width,opacity] duration-200 ease-out"
+          style={{
+            width: `${indicator.width}px`,
+            transform: `translateX(${indicator.left}px)`,
+            opacity: indicator.opacity,
+          }}
+        />
       </nav>
 
       <div className="flex-1" />

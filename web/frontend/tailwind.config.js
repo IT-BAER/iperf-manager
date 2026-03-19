@@ -4,19 +4,20 @@ export default {
   theme: {
     extend: {
       colors: {
-        bg: '#0c0c0f',
+        bg: '#0d1117',
         surface: {
-          DEFAULT: '#121215',
-          raised: '#19191d',
-          hover: '#202025',
-          active: '#28282e',
+          DEFAULT: '#151b23',
+          raised: '#212830',
+          hover: '#262c36',
+          active: '#2a313c',
         },
-        line: { DEFAULT: '#232328', bright: '#3a3a42' },
-        fg: { DEFAULT: '#e8e8ec', 2: '#9898a0', 3: '#6a6a74', 4: '#484852' },
-        accent: { DEFAULT: '#4b8df8', dim: '#3a7de6', subtle: 'rgba(75,141,248,0.08)' },
-        ok: { DEFAULT: '#3ec96a', subtle: 'rgba(62,201,106,0.08)' },
-        warn: { DEFAULT: '#e8a43a', subtle: 'rgba(232,164,58,0.08)' },
-        err: { DEFAULT: '#e5534b', subtle: 'rgba(229,83,75,0.08)' },
+        line: { DEFAULT: '#3d444d', bright: '#656c76' },
+        fg: { DEFAULT: '#f0f6fc', 2: '#c9d1d9', 3: '#9198a1', 4: '#656d76' },
+        accent: { DEFAULT: '#4493f8', dim: '#1f6feb', subtle: 'rgba(56,139,253,0.10)' },
+        ok: { DEFAULT: '#3fb950', subtle: 'rgba(46,160,67,0.15)' },
+        warn: { DEFAULT: '#d29922', subtle: 'rgba(210,153,34,0.16)' },
+        err: { DEFAULT: '#f85149', subtle: 'rgba(248,81,73,0.10)' },
+        tab: { active: '#f78166' },
       },
       fontFamily: {
         sans: ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'system-ui', 'sans-serif'],

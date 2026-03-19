@@ -7,13 +7,16 @@ interface Props {
 }
 
 export function LogPanel({ logs, onClear }: Props) {
-  const endRef = useRef<HTMLDivElement>(null)
+  const scrollerRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(true)
 
   const prevLenRef = useRef(logs.length)
   useEffect(() => {
     if (open && logs.length > prevLenRef.current) {
-      endRef.current?.scrollIntoView({ behavior: 'smooth' })
+      scrollerRef.current?.scrollTo({
+        top: scrollerRef.current.scrollHeight,
+        behavior: 'smooth',
+      })
     }
     prevLenRef.current = logs.length
   }, [logs.length, open])
@@ -46,7 +49,7 @@ export function LogPanel({ logs, onClear }: Props) {
       </div>
       <div className={`collapsible-grid ${open ? 'open' : 'closed'}`}>
         <div className="collapsible-inner">
-          <div className="h-44 overflow-y-auto p-3 font-mono text-[12px] leading-5 bg-bg">
+          <div ref={scrollerRef} className="h-44 overflow-y-auto p-3 font-mono text-[12px] leading-5 bg-bg">
             {logs.length === 0 ? (
               <span className="text-fg-3">No log entries.</span>
             ) : (
@@ -59,7 +62,6 @@ export function LogPanel({ logs, onClear }: Props) {
                 </div>
               ))
             )}
-            <div ref={endRef} />
           </div>
         </div>
       </div>
