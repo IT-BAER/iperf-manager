@@ -102,6 +102,8 @@ Windows agent (PowerShell as Administrator):
 powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/Install-Agent.ps1 | iex"
 ```
 
+If Python or Git is missing, the Windows installer attempts to install them automatically.
+
 Windows agent uninstall:
 
 ```powershell
