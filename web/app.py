@@ -9,6 +9,7 @@ import csv
 import hashlib
 import hmac
 import io
+import ipaddress
 import json
 import os
 import socket
@@ -378,7 +379,7 @@ def _refresh_agent(aid: str, info: dict) -> dict:
 
 
 def _discover_agents(timeout: float = 3.0) -> list[dict]:
-    """Discover agents via UDP broadcast, with unicast /24 fallback."""
+    """Discover agents via UDP broadcast, with configurable unicast fallback."""
     found_by_url: dict[str, dict] = {}
 
     def _record_packet(data: bytes, addr: tuple[str, int]) -> None:
@@ -423,27 +424,57 @@ def _discover_agents(timeout: float = 3.0) -> list[dict]:
 
     _probe([("<broadcast>", DISCOVER_PORT), ("255.255.255.255", DISCOVER_PORT)], timeout)
 
-    # Some bridge/firewall setups suppress broadcast packets between containers.
-    if not found_by_url:
-        local_ip = ""
-        probe_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            probe_sock.connect(("10.255.255.255", 1))
-            local_ip = probe_sock.getsockname()[0]
-        except OSError:
-            pass
-        finally:
-            probe_sock.close()
+    local_ip = ""
+    probe_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe_sock.connect(("10.255.255.255", 1))
+        local_ip = probe_sock.getsockname()[0]
+    except OSError:
+        pass
+    finally:
+        probe_sock.close()
 
-        octets = local_ip.split(".")
-        if len(octets) == 4 and all(part.isdigit() for part in octets):
-            prefix = ".".join(octets[:3])
-            targets = [
-                (f"{prefix}.{host}", DISCOVER_PORT)
-                for host in range(1, 255)
-                if f"{prefix}.{host}" != local_ip
-            ]
-            _probe(targets, min(timeout, 2.0))
+    targets: list[str] = []
+    seen: set[str] = set()
+
+    def _add_target(host: str) -> None:
+        try:
+            ipaddress.ip_address(host)
+        except ValueError:
+            return
+        if host == local_ip or host in seen:
+            return
+        seen.add(host)
+        targets.append(host)
+
+    cidr_list = os.environ.get("DASHBOARD_DISCOVERY_CIDRS", "").strip()
+    if cidr_list:
+        for token in cidr_list.split(","):
+            candidate = token.strip()
+            if not candidate:
+                continue
+            if "/" in candidate:
+                try:
+                    net = ipaddress.ip_network(candidate, strict=False)
+                except ValueError:
+                    continue
+                if net.num_addresses > 1024:
+                    continue
+                for ip in net.hosts():
+                    _add_target(str(ip))
+            else:
+                _add_target(candidate)
+
+    if not found_by_url and not targets and local_ip:
+        try:
+            local_net = ipaddress.ip_network(f"{local_ip}/24", strict=False)
+            for ip in local_net.hosts():
+                _add_target(str(ip))
+        except ValueError:
+            pass
+
+    if targets:
+        _probe([(host, DISCOVER_PORT) for host in targets], min(timeout, 2.0))
 
     return list(found_by_url.values())
 
