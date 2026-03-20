@@ -94,6 +94,8 @@ Install:
 powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/Install-Agent.ps1 | iex"
 ```
 
+If Python or Git is missing, the installer now attempts a silent bootstrap of both dependencies before continuing.
+
 Install or update with parameters:
 
 ```powershell
