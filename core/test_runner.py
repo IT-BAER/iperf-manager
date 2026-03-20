@@ -50,6 +50,7 @@ def run_test(cfg: dict,
             common[k if k != 'tcp_window' else 'window'] = cfg[k]
 
     ports = [base_port + i for i, _ in enumerate(clients)]
+    startup_errors: list[str] = []
 
     # Start servers (with optional bind / bind_map)
     try:
@@ -59,9 +60,25 @@ def run_test(cfg: dict,
                 payload['bind'] = server_cfg['bind']
             if server_cfg.get('bind_map'):
                 payload['bind_map'] = server_cfg['bind_map']
-            http_post_json(server, '/server/start', payload, api_key=server_api_key)
-            log('[server/start] OK')
+            rsp = http_post_json(server, '/server/start', payload, api_key=server_api_key)
+            if isinstance(rsp, dict):
+                started = rsp.get('started') or []
+                already = rsp.get('already_running') or []
+                errors = rsp.get('errors') or {}
+
+                if started:
+                    log(f'[server/start] started ports: {started}')
+                if already:
+                    log(f'[server/start] already running: {already}')
+                if errors:
+                    log(f'[controller] server/start errors: {errors}')
+
+                if (not started) and (not already) and errors:
+                    raise RuntimeError('server/start failed for all requested ports')
+            else:
+                log('[server/start] OK')
     except Exception as e:
+        startup_errors.append(f'server/start: {e}')
         log(f'[controller] server/start error: {e}')
 
     # Start clients
@@ -69,7 +86,9 @@ def run_test(cfg: dict,
         try:
             target = c.get('target', '')
             if not target:
-                log(f'[controller] skip empty target: {c.get("name")}')
+                msg = f'client/start skipped (empty target): {c.get("name") or c.get("agent")}'
+                startup_errors.append(msg)
+                log(f'[controller] {msg}')
                 continue
             payload = {'target': target, 'port': ports[i], 'duration': duration}
             for k, v in common.items():
@@ -92,8 +111,24 @@ def run_test(cfg: dict,
             client_api_key = str(c.get('api_key') or global_api_key).strip()
             http_post_json(c['agent'], '/client/start', payload, api_key=client_api_key)
         except Exception as e:
+            startup_errors.append(f'client/start {c.get("agent")}: {e}')
             log(f'[controller] client/start error: {c.get("agent")} {e}')
         time.sleep(0.05)
+
+    if startup_errors:
+        # Fail fast on startup/auth errors (e.g., HTTP 403) instead of running a full empty-duration test.
+        for c in clients:
+            try:
+                client_api_key = str(c.get('api_key') or global_api_key).strip()
+                http_post_json(c['agent'], '/client/stop', {}, api_key=client_api_key)
+            except Exception:
+                pass
+        if server:
+            try:
+                http_post_json(server, '/server/stop', {}, api_key=server_api_key)
+            except Exception:
+                pass
+        raise RuntimeError('; '.join(startup_errors))
 
     # Prepare CSV columns
     agent_names = [c.get('name', f'agent{i}') for i, c in enumerate(clients)]
@@ -134,6 +169,32 @@ def run_test(cfg: dict,
         csv_rows.append(row)
         time.sleep(poll_interval_sec)
 
+    # Final snapshot to catch delayed metric flush from older iperf builds.
+    try:
+        ts = time.time()
+        wall = time.strftime('%Y-%m-%d %H:%M:%S')
+        row = {'ts': f'{ts:.0f}', 'wall': wall}
+        total_up, total_dn = 0.0, 0.0
+        for i, c in enumerate(clients):
+            try:
+                client_api_key = str(c.get('api_key') or global_api_key).strip()
+                u, d, _ub, _db, _jit, _los = poll_metrics(
+                    c['agent'], mode_hint=mode_hint, api_key=client_api_key
+                )
+            except Exception:
+                u, d = 0.0, 0.0
+            n = agent_names[i]
+            row[f'{n}_up'] = f'{u:.3f}'
+            row[f'{n}_dn'] = f'{d:.3f}'
+            total_up += u
+            total_dn += d
+        row['total_up'] = f'{total_up:.3f}'
+        row['total_dn'] = f'{total_dn:.3f}'
+        if (total_up > 0.0) or (total_dn > 0.0):
+            csv_rows.append(row)
+    except Exception:
+        pass
+
     # Stop clients
     for c in clients:
         try:
@@ -143,7 +204,7 @@ def run_test(cfg: dict,
             log(f'[controller] client/stop error: {e}')
 
     # Optionally stop servers
-    keep = cfg.get('keep_servers_open', True)
+    keep = cfg.get('keep_servers_open', False)
     try:
         if server and not keep:
             http_post_json(server, '/server/stop', {}, api_key=server_api_key)

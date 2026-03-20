@@ -355,6 +355,17 @@ export function App() {
     }
   }, [toast])
 
+  const updateAgentKey = useCallback(async (id: string, apiKey: string) => {
+    const data = await api<Agent>(`/api/agents/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ api_key: apiKey }),
+    })
+    if (data) {
+      setAgents(prev => prev.map(a => (a.id === data.id ? data : a)))
+      toast(apiKey ? `Stored API key for "${data.name}"` : `Cleared API key for "${data.name}"`, 'ok')
+    }
+  }, [toast])
+
   const removeAgent = useCallback(async (id: string) => {
     await api(`/api/agents/${id}`, { method: 'DELETE' })
     setAgents(prev => prev.filter(a => a.id !== id))
@@ -449,6 +460,7 @@ export function App() {
           agents={agents}
           onRefresh={refreshAgents}
           onAdd={addAgent}
+          onUpdateAgentKey={updateAgentKey}
           onRemove={removeAgent}
           onDiscover={discoverAgents}
           isDiscovering={isDiscovering}
