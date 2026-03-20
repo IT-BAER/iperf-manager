@@ -47,6 +47,8 @@ $RepoUrl        = "https://github.com/IT-BAER/iperf-manager.git"
 $Iperf3Dir      = Join-Path $InstallDir "iperf3"
 $FwRulePrefix   = "iperf-manager"
 $Iperf3Release  = "https://api.github.com/repos/ar51an/iperf3-win-builds/releases/latest"
+$PythonInstallerUrl = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
+$GitInstallerUrl = "https://github.com/git-for-windows/git/releases/latest/download/Git-64-bit.exe"
 $TokenGenerated = $false
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -54,6 +56,88 @@ function Write-Step  { param([string]$Msg) Write-Host "[INFO]  $Msg" -Foreground
 function Write-Ok    { param([string]$Msg) Write-Host "[ OK ]  $Msg" -ForegroundColor Green }
 function Write-Warn  { param([string]$Msg) Write-Host "[WARN]  $Msg" -ForegroundColor Yellow }
 function Write-Err   { param([string]$Msg) Write-Host "[ERR ]  $Msg" -ForegroundColor Red }
+
+function Refresh-Path {
+    $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    $env:Path = "$machinePath;$userPath"
+}
+
+function Resolve-Python {
+    foreach ($candidate in @("python", "python3", "py -3")) {
+        try {
+            $verOutput = & cmd /c "$candidate --version 2>&1"
+            if ($verOutput -match "Python (\d+)\.(\d+)") {
+                $major = [int]$Matches[1]
+                $minor = [int]$Matches[2]
+                if ($major -ge 3 -and $minor -ge 9) {
+                    if ($candidate -eq "py -3") {
+                        $bin = "py -3"
+                    } else {
+                        $resolved = Get-Command $candidate -ErrorAction SilentlyContinue
+                        if ($resolved) { $bin = $resolved.Source } else { $bin = $candidate }
+                    }
+                    return [pscustomobject]@{
+                        Bin = $bin
+                        Major = $major
+                        Minor = $minor
+                    }
+                }
+            }
+        } catch { }
+    }
+
+    foreach ($path in @(
+        "C:\\Program Files\\Python312\\python.exe",
+        "C:\\Program Files\\Python311\\python.exe",
+        "C:\\Program Files\\Python310\\python.exe",
+        "C:\\Python312\\python.exe",
+        "C:\\Python311\\python.exe",
+        "C:\\Python310\\python.exe"
+    )) {
+        if (-not (Test-Path $path)) { continue }
+        try {
+            $verOutput = & $path --version 2>&1
+            if ($verOutput -match "Python (\d+)\.(\d+)") {
+                $major = [int]$Matches[1]
+                $minor = [int]$Matches[2]
+                if ($major -ge 3 -and $minor -ge 9) {
+                    return [pscustomobject]@{
+                        Bin = $path
+                        Major = $major
+                        Minor = $minor
+                    }
+                }
+            }
+        } catch { }
+    }
+
+    return $null
+}
+
+function Install-Python {
+    Write-Step "Downloading Python installer ..."
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    $installerPath = Join-Path $env:TEMP "python-installer-amd64.exe"
+    Invoke-WebRequest -Uri $PythonInstallerUrl -OutFile $installerPath -UseBasicParsing
+
+    Write-Step "Installing Python silently ..."
+    & $installerPath /quiet InstallAllUsers=1 PrependPath=1 Include_test=0
+    Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue
+    Refresh-Path
+}
+
+function Install-Git {
+    Write-Step "Downloading Git for Windows installer ..."
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    $installerPath = Join-Path $env:TEMP "git-installer-amd64.exe"
+    Invoke-WebRequest -Uri $GitInstallerUrl -OutFile $installerPath -UseBasicParsing
+
+    Write-Step "Installing Git silently ..."
+    & $installerPath /VERYSILENT /NORESTART /NOCANCEL /SP-
+    Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue
+    Refresh-Path
+}
 
 function Test-Admin {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -117,28 +201,18 @@ Write-Host ""
 
 # ── 1. Check Python 3.9+ ────────────────────────────────────────────
 Write-Step "Checking Python ..."
-$PythonBin = $null
-foreach ($candidate in @("python", "python3", "py -3")) {
+$pythonInfo = Resolve-Python
+if (-not $pythonInfo) {
+    Write-Warn "Python 3.9+ not found. Attempting automatic installation ..."
     try {
-        $verOutput = & cmd /c "$candidate --version 2>&1"
-        if ($verOutput -match "Python (\d+)\.(\d+)") {
-            $pyMajor = [int]$Matches[1]
-            $pyMinor = [int]$Matches[2]
-            if ($pyMajor -ge 3 -and $pyMinor -ge 9) {
-                # Resolve full path for the working candidate
-                if ($candidate -eq "py -3") {
-                    $PythonBin = "py -3"
-                } else {
-                    $resolved = Get-Command $candidate -ErrorAction SilentlyContinue
-                    if ($resolved) { $PythonBin = $resolved.Source } else { $PythonBin = $candidate }
-                }
-                break
-            }
-        }
-    } catch { }
+        Install-Python
+    } catch {
+        Write-Err "Automatic Python install failed: $_"
+    }
+    $pythonInfo = Resolve-Python
 }
 
-if (-not $PythonBin) {
+if (-not $pythonInfo) {
     Write-Err "Python 3.9+ is required but not found."
     Write-Host ""
     Write-Host "Install Python from https://www.python.org/downloads/" -ForegroundColor Yellow
@@ -146,6 +220,10 @@ if (-not $PythonBin) {
     Write-Host "  - Restart this script after installing Python" -ForegroundColor Yellow
     exit 1
 }
+
+$PythonBin = $pythonInfo.Bin
+$pyMajor = $pythonInfo.Major
+$pyMinor = $pythonInfo.Minor
 Write-Ok "Python found: $PythonBin ($pyMajor.$pyMinor)"
 
 if (-not $Token) {
@@ -243,6 +321,15 @@ if (Test-Path $gitDir) {
     Write-Ok "Repository updated"
 } else {
     $gitCmd = Get-Command "git" -ErrorAction SilentlyContinue
+    if (-not $gitCmd) {
+        Write-Warn "Git not found. Attempting automatic installation ..."
+        try {
+            Install-Git
+        } catch {
+            Write-Err "Automatic Git install failed: $_"
+        }
+        $gitCmd = Get-Command "git" -ErrorAction SilentlyContinue
+    }
     if (-not $gitCmd) {
         Write-Err "Git is not installed. Install Git from https://git-scm.com/download/win"
         exit 1
