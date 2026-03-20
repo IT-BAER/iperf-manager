@@ -729,6 +729,38 @@ def add_agent():
     return jsonify(_public_agent(info)), 201
 
 
+@app.route("/api/agents/<agent_id>", methods=["PATCH"])
+def update_agent(agent_id):
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "invalid payload"}), 400
+
+    with _agents_lock:
+        existing = dict(_agents.get(agent_id, {}))
+    if not existing:
+        return jsonify({"error": "not found"}), 404
+
+    existing_name = str(existing.get("name", "") or "").strip()
+    existing_key = str(existing.get("api_key", "") or "").strip()
+    name = str(data.get("name", existing_name) or "").strip() or existing_name or existing.get("url", "")
+    api_key = existing_key
+    if "api_key" in data:
+        api_key = str(data.get("api_key", "") or "").strip()
+
+    info = {
+        "id": existing.get("id", agent_id),
+        "url": existing.get("url", ""),
+        "name": name,
+        "status": existing.get("status", "unknown"),
+        "last_seen": existing.get("last_seen"),
+        "api_key": api_key,
+        "details": existing.get("details", {}),
+    }
+    _refresh_agent(agent_id, info)
+    _save_agents_state()
+    return jsonify(_public_agent(info))
+
+
 @app.route("/api/agents/<agent_id>", methods=["DELETE"])
 def remove_agent(agent_id):
     with _agents_lock:

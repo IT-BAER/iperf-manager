@@ -6,6 +6,7 @@ interface Props {
   agents: Agent[]
   onRefresh: () => void
   onAdd: (url: string, name: string, apiKey: string) => void
+  onUpdateAgentKey: (id: string, apiKey: string) => void
   onRemove: (id: string) => void
   onDiscover: () => void
   isDiscovering?: boolean
@@ -26,7 +27,7 @@ function RefreshIcon() {
   return <i className="fa-solid fa-rotate-right text-[11px] shrink-0" aria-hidden="true" />
 }
 
-export function Sidebar({ open, agents, onRefresh, onAdd, onRemove, onDiscover, isDiscovering, isRefreshing }: Props) {
+export function Sidebar({ open, agents, onRefresh, onAdd, onUpdateAgentKey, onRemove, onDiscover, isDiscovering, isRefreshing }: Props) {
   const [addUrl, setAddUrl] = useState('')
   const [addName, setAddName] = useState('')
   const [addApiKey, setAddApiKey] = useState('')
@@ -39,6 +40,12 @@ export function Sidebar({ open, agents, onRefresh, onAdd, onRemove, onDiscover, 
     setAddName('')
     setAddApiKey('')
     setShowAdd(false)
+  }
+
+  const handleSetKey = (agent: Agent) => {
+    const entered = window.prompt(`Set API key for ${agent.name} (leave empty to clear):`, '')
+    if (entered === null) return
+    onUpdateAgentKey(agent.id, entered.trim())
   }
 
   const online = agents.filter(a => a.status === 'online').length
@@ -160,13 +167,23 @@ export function Sidebar({ open, agents, onRefresh, onAdd, onRemove, onDiscover, 
                       {agent.name}
                     </span>
                   </div>
-                  <button
-                    onClick={() => onRemove(agent.id)}
-                    className="opacity-0 group-hover:opacity-100 text-fg-3 hover:text-err transition-opacity active:scale-90"
-                    aria-label={`Remove ${agent.name}`}
-                  >
-                    <i className="fa-solid fa-xmark text-[11px]" />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleSetKey(agent)}
+                      className="text-fg-3 hover:text-accent active:scale-90"
+                      aria-label={`Set API key for ${agent.name}`}
+                      title="Set API key"
+                    >
+                      <i className="fa-solid fa-key text-[10px]" />
+                    </button>
+                    <button
+                      onClick={() => onRemove(agent.id)}
+                      className="text-fg-3 hover:text-err active:scale-90 opacity-0 group-hover:opacity-100 transition-opacity"
+                      aria-label={`Remove ${agent.name}`}
+                    >
+                      <i className="fa-solid fa-xmark text-[11px]" />
+                    </button>
+                  </div>
                 </div>
                 <div className="text-xs text-fg-3 mt-0.5 ml-3.5 truncate font-mono">
                   {agent.url}
