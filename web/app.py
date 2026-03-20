@@ -379,7 +379,7 @@ def _refresh_agent(aid: str, info: dict) -> dict:
 
 
 def _discover_agents(timeout: float = 3.0) -> list[dict]:
-    """Discover agents via UDP broadcast, with configurable unicast fallback."""
+    """Discover agents via unicast targets, with optional UDP broadcast."""
     found_by_url: dict[str, dict] = {}
 
     def _record_packet(data: bytes, addr: tuple[str, int]) -> None:
@@ -422,8 +422,6 @@ def _discover_agents(timeout: float = 3.0) -> list[dict]:
         finally:
             sock.close()
 
-    _probe([("<broadcast>", DISCOVER_PORT), ("255.255.255.255", DISCOVER_PORT)], timeout)
-
     local_ip = ""
     probe_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
@@ -464,6 +462,18 @@ def _discover_agents(timeout: float = 3.0) -> list[dict]:
                     _add_target(str(ip))
             else:
                 _add_target(candidate)
+
+    broadcast_mode = os.environ.get("DASHBOARD_DISCOVERY_BROADCAST", "auto").strip().lower()
+    if broadcast_mode in {"1", "true", "yes", "on"}:
+        use_broadcast = True
+    elif broadcast_mode in {"0", "false", "no", "off"}:
+        use_broadcast = False
+    else:
+        # Auto mode: avoid noisy global broadcasts when explicit targets are configured.
+        use_broadcast = not bool(targets)
+
+    if use_broadcast:
+        _probe([("<broadcast>", DISCOVER_PORT), ("255.255.255.255", DISCOVER_PORT)], timeout)
 
     if not found_by_url and not targets and local_ip:
         try:
