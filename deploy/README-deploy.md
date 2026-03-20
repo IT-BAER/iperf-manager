@@ -220,7 +220,7 @@ npm run build
 sudo bash /opt/iperf-manager/deploy/setup-web-service.sh
 ```
 
-If you do not provide dashboard auth settings, the setup script generates a random admin password on a fresh install, stores only its hash in the service, and prints the one-time password in the terminal. On later reruns, if auth settings already exist and you do not pass new ones, the script preserves the existing username and stored hash instead of rotating the password.
+If you do not provide dashboard auth settings, the setup script generates a random admin password on a fresh install, stores only its hash in the service, and prints the one-time password in the terminal. On later reruns, if auth settings already exist and you do not pass new ones, the script preserves the existing username and stored hash instead of rotating the password. Existing auth is read from the current systemd unit and, when present, `/etc/iperf-manager/web.env`.
 
 To enable built-in dashboard authentication with a password hash:
 

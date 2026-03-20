@@ -3,6 +3,7 @@ set -euo pipefail
 
 SERVICE_NAME=iperf-web
 SERVICE_FILE=/etc/systemd/system/${SERVICE_NAME}.service
+STATE_ENV_FILE=/etc/iperf-manager/web.env
 HASH_PYTHON_BIN=python3
 DEFAULT_WEB_PORT=5000
 
@@ -14,6 +15,12 @@ read_service_env() {
 	local name="$1"
 	[[ -f "$SERVICE_FILE" ]] || return 0
 	sed -n "s/^Environment=${name}=//p" "$SERVICE_FILE" | tail -n 1
+}
+
+read_state_env() {
+	local name="$1"
+	[[ -f "$STATE_ENV_FILE" ]] || return 0
+	sed -n "s/^${name}=//p" "$STATE_ENV_FILE" | tail -n 1
 }
 
 read_service_port() {
@@ -35,12 +42,19 @@ hash_password() {
 	AUTH_PASSWORD_VALUE="$password" "$HASH_PYTHON_BIN" -c "import os; from werkzeug.security import generate_password_hash; print(generate_password_hash(os.environ['AUTH_PASSWORD_VALUE']), end='')"
 }
 
-EXISTING_FLASK_KEY=$(read_service_env FLASK_SECRET)
-EXISTING_AUTH_USER=$(read_service_env DASHBOARD_AUTH_USERNAME)
-EXISTING_AUTH_PASSWORD=$(read_service_env DASHBOARD_AUTH_PASSWORD)
-EXISTING_AUTH_PASSWORD_HASH=$(read_service_env DASHBOARD_AUTH_PASSWORD_HASH)
-EXISTING_AUTH_DISABLED=$(read_service_env DASHBOARD_AUTH_DISABLE)
-EXISTING_COOKIE_SECURE=$(read_service_env SESSION_COOKIE_SECURE)
+EXISTING_FLASK_KEY=$(read_state_env FLASK_SECRET)
+EXISTING_AUTH_USER=$(read_state_env DASHBOARD_AUTH_USERNAME)
+EXISTING_AUTH_PASSWORD=$(read_state_env DASHBOARD_AUTH_PASSWORD)
+EXISTING_AUTH_PASSWORD_HASH=$(read_state_env DASHBOARD_AUTH_PASSWORD_HASH)
+EXISTING_AUTH_DISABLED=$(read_state_env DASHBOARD_AUTH_DISABLE)
+EXISTING_COOKIE_SECURE=$(read_state_env SESSION_COOKIE_SECURE)
+
+EXISTING_FLASK_KEY=${EXISTING_FLASK_KEY:-$(read_service_env FLASK_SECRET)}
+EXISTING_AUTH_USER=${EXISTING_AUTH_USER:-$(read_service_env DASHBOARD_AUTH_USERNAME)}
+EXISTING_AUTH_PASSWORD=${EXISTING_AUTH_PASSWORD:-$(read_service_env DASHBOARD_AUTH_PASSWORD)}
+EXISTING_AUTH_PASSWORD_HASH=${EXISTING_AUTH_PASSWORD_HASH:-$(read_service_env DASHBOARD_AUTH_PASSWORD_HASH)}
+EXISTING_AUTH_DISABLED=${EXISTING_AUTH_DISABLED:-$(read_service_env DASHBOARD_AUTH_DISABLE)}
+EXISTING_COOKIE_SECURE=${EXISTING_COOKIE_SECURE:-$(read_service_env SESSION_COOKIE_SECURE)}
 EXISTING_WEB_PORT=$(read_service_port)
 
 FLASK_KEY=${EXISTING_FLASK_KEY:-$(python3 -c "import secrets; print(secrets.token_hex(32), end='')")}
