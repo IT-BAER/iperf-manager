@@ -70,6 +70,13 @@ curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/i
   | sudo bash -s -- --uninstall
 ```
 
+Uninstall and purge `/opt/iperf-manager`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-agent-linux.sh \
+  | sudo bash -s -- --uninstall --purge
+```
+
 For staged local-tree rollouts, extract the repo to `/opt/iperf-manager` first and then run:
 
 ```bash
@@ -265,6 +272,8 @@ Linux agent:
 ```bash
 sudo bash /opt/iperf-manager/deploy/install-agent-linux.sh --uninstall
 ```
+
+Add `--purge` if you also want to remove `/opt/iperf-manager`.
 
 Windows agent:
 
