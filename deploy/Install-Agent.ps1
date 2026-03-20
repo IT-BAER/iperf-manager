@@ -47,7 +47,7 @@ $RepoUrl        = "https://github.com/IT-BAER/iperf-manager.git"
 $RepoZipUrl     = "https://github.com/IT-BAER/iperf-manager/archive/refs/heads/main.zip"
 $Iperf3Dir      = Join-Path $InstallDir "iperf3"
 $FwRulePrefix   = "iperf-manager"
-$Iperf3Release  = "https://api.github.com/repos/ar51an/iperf3-win-builds/releases/latest"
+$Iperf3Release  = "https://api.github.com/repos/ar51an/iperf3-win-builds/releases/tags/3.13"
 $PythonInstallerUrl = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
 $GitInstallerUrl = "https://github.com/git-for-windows/git/releases/latest/download/Git-64-bit.exe"
 $TokenGenerated = $false
@@ -180,13 +180,16 @@ function Stop-AgentProcesses {
         Start-Sleep -Seconds 2
     }
 
-    $agentProcs = Get-Process -ErrorAction SilentlyContinue |
+    # Use Win32_Process so CommandLine/ExecutablePath are available reliably.
+    $agentProcs = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
         Where-Object {
-            $_.Path -like "$InstallDir*" -or $_.CommandLine -like "*main_agent.py*"
+            ($_.ExecutablePath -like "$InstallDir*") -or
+            ($_.CommandLine -like "*main_agent.py*") -or
+            ($_.Name -ieq "iperf3.exe" -and $_.ExecutablePath -like "$InstallDir*")
         }
 
     foreach ($proc in $agentProcs) {
-        Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+        Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -210,13 +213,9 @@ if ($Uninstall) {
     Write-Host ""
     Write-Step "Uninstalling iperf-manager agent ..."
 
-    # Stop running agent processes
-    $agentProcs = Get-Process -Name "python*" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -like "*main_agent.py*" }
-    foreach ($proc in $agentProcs) {
-        Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-        Write-Ok "Stopped agent process (PID $($proc.Id))"
-    }
+    # Stop scheduled task + managed python/iperf child processes
+    Stop-AgentProcesses
+    Write-Ok "Stopped running agent processes"
 
     # Remove scheduled task
     $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
@@ -306,10 +305,17 @@ if (Test-Path $iperf3Exe) {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         $releaseInfo = Invoke-RestMethod -Uri $Iperf3Release -UseBasicParsing
 
-        # Find the zip asset (prefer 64-bit)
+        # Find the zip asset (prefer non-auth 64-bit)
         $asset = $releaseInfo.assets |
-            Where-Object { $_.name -match "iperf3.*win.*64.*\.zip$" -or $_.name -match "iperf3.*\.zip$" } |
+            Where-Object { $_.name -match "win.*64.*\.zip$" -and $_.name -notmatch "auth" } |
             Select-Object -First 1
+
+        if (-not $asset) {
+            # Fallback: any 64-bit iperf zip
+            $asset = $releaseInfo.assets |
+                Where-Object { $_.name -match "iperf.*win.*64.*\.zip$" -or $_.name -match "iperf.*\.zip$" } |
+                Select-Object -First 1
+        }
 
         if (-not $asset) {
             # Fallback: grab any zip asset
@@ -332,10 +338,15 @@ if (Test-Path $iperf3Exe) {
         if (Test-Path $extractPath) { Remove-Item -Path $extractPath -Recurse -Force }
         Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
 
-        # Copy iperf3.exe and any required DLLs (cygwin, msys2, etc.)
-        $files = Get-ChildItem -Path $extractPath -Recurse -Include "iperf3.exe","iperf3*.dll","cygwin*.dll","msys*.dll","libiperf*.dll"
-        foreach ($f in $files) {
-            Copy-Item -Path $f.FullName -Destination $Iperf3Dir -Force
+        # Copy all files from the extracted directory containing iperf3.exe.
+        # This keeps runtime dependencies in sync even when upstream filenames change.
+        $iperfExeExtracted = Get-ChildItem -Path $extractPath -Recurse -Filter "iperf3.exe" | Select-Object -First 1
+        if (-not $iperfExeExtracted) {
+            throw "iperf3.exe not found after extraction"
+        }
+        $iperfSourceDir = Split-Path -Parent $iperfExeExtracted.FullName
+        Get-ChildItem -Path $iperfSourceDir -File | ForEach-Object {
+            Copy-Item -Path $_.FullName -Destination $Iperf3Dir -Force
         }
 
         # Cleanup temp files
@@ -462,7 +473,8 @@ $configObj = @{
     advertise_ip = ""
     api_token    = $Token
 }
-$configObj | ConvertTo-Json -Depth 4 | Set-Content -Path $configFile -Encoding UTF8
+$configJson = $configObj | ConvertTo-Json -Depth 4
+[System.IO.File]::WriteAllText($configFile, $configJson, (New-Object System.Text.UTF8Encoding($false)))
 Write-Ok "Config written to $configFile"
 
 # ── 5. Create scheduled task ────────────────────────────────────────

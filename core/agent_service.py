@@ -34,7 +34,13 @@ from core.helpers import (
 AGENT_VERSION = '6.0.2'
 
 # --- config persistence ---
-CFG_DIR = Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'iperf3-agent'
+# Prefer installer-provided override when available (especially for Windows
+# scheduled-task runs under SYSTEM where LOCALAPPDATA may not be the intended
+# config root for iperf-manager).
+CFG_DIR = Path(
+    os.environ.get('LOCALAPPDATA_IPERF')
+    or os.environ.get('LOCALAPPDATA', str(Path.home()))
+) / 'iperf3-agent'
 CFG_DIR.mkdir(parents=True, exist_ok=True)
 CFG_FILE = CFG_DIR / 'config.json'
 
@@ -43,7 +49,9 @@ def load_agent_cfg() -> dict:
     """Load agent config from persistent storage."""
     try:
         if CFG_FILE.exists():
-            return json.loads(CFG_FILE.read_text(encoding='utf-8'))
+            # Accept UTF-8 files with or without BOM to stay compatible with
+            # PowerShell-generated config files on Windows.
+            return json.loads(CFG_FILE.read_text(encoding='utf-8-sig'))
     except Exception as e:
         print(f'[WARN] config load failed: {e}')
     return {}
@@ -97,6 +105,8 @@ class AgentService:
         self.disc_thread = None
         self.stop_flag = False
         self.version_str = ''
+        self.supports_forceflush = True
+        self.supports_bidir = True
         self._hooks_registered = False
 
         # --- regex patterns for parsing iperf3 output ---
@@ -265,20 +275,47 @@ class AgentService:
             cmd += ['-B', str(bind_ip)]
 
         lf = open(log, 'ab')
-        proc = subprocess.Popen(
-            cmd,
-            stdin=subprocess.DEVNULL,
-            stdout=lf,
-            stderr=subprocess.STDOUT,
-            close_fds=True,
-            start_new_session=True,
-            preexec_fn=self._child_close_fds,
-        )
-        lf.close()
+        try:
+            proc = self._popen(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=lf,
+                stderr=subprocess.STDOUT,
+                start_new_session=(not IS_WIN),
+            )
+        finally:
+            lf.close()
         time.sleep(0.15)
         if proc.poll() is not None:
             raise RuntimeError('iperf3 server exited immediately')
         return proc, log
+
+    def _is_tcp_listener_reachable(self, port: int, bind_ip: str | None = None) -> bool:
+        candidates = []
+        if bind_ip and str(bind_ip).strip() and bind_ip not in ('0.0.0.0', '::'):
+            candidates.append(str(bind_ip).strip())
+        candidates += ['127.0.0.1', self._advertise_ip()]
+        seen = set()
+        hosts = []
+        for h in candidates:
+            if not h or h in seen:
+                continue
+            seen.add(h)
+            hosts.append(h)
+        for host in hosts:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                s.settimeout(0.3)
+                if s.connect_ex((host, int(port))) == 0:
+                    return True
+            except Exception:
+                pass
+            finally:
+                try:
+                    s.close()
+                except Exception:
+                    pass
+        return False
 
     def _stop_proc(self, p):
         try:
@@ -435,11 +472,15 @@ class AgentService:
 
         args = [self.iperf3_bin, '-c', task['target'], '-p', str(task['port'])]
         args += ['-i', str(task.get('interval', '1'))]
-        args.append('--forceflush')
+        if self.supports_forceflush:
+            args.append('--forceflush')
         if is_udp:
             args.append('-u')
         if task.get('bidir'):
-            args.append('--bidir')
+            if self.supports_bidir:
+                args.append('--bidir')
+            else:
+                self._log('WARN', 'client', 'bidir requested but unsupported by this iperf3 build; falling back to forward mode')
         elif task.get('reverse'):
             args.append('-R')
         if task.get('duration'):
@@ -805,7 +846,11 @@ class AgentService:
                                     outer.SERVER_PROCS[int(port)] = proc
                                     started.append(port)
                                 except Exception as e:
-                                    errors[str(port)] = str(e)
+                                    msg = str(e)
+                                    if 'exited immediately' in msg.lower() and outer._is_tcp_listener_reachable(int(port), bind_ip=bind_ip):
+                                        already.append(port)
+                                    else:
+                                        errors[str(port)] = msg
                         self._json(200, {'started': started, 'already_running': already, 'errors': errors})
                         return
 
@@ -866,6 +911,8 @@ class AgentService:
         if self.httpd:
             return
         self.stop_flag = False
+        self.supports_forceflush = True
+        self.supports_bidir = True
         try:
             self.iperf3_bin = resolve_iperf3_path(self.iperf3_bin)
             ver_out = subprocess.check_output(
@@ -874,6 +921,30 @@ class AgentService:
             self.version_str = ver_out.strip().splitlines()[0]
         except Exception as e:
             self.version_str = f'? ({e})'
+
+        # Version fallback for very old builds.
+        m = re.search(r'(?i)iperf\s+(\d+)\.(\d+)(?:\.(\d+))?', self.version_str or '')
+        if m:
+            ver = (int(m.group(1)), int(m.group(2)), int(m.group(3) or 0))
+            self.supports_forceflush = ver >= (3, 2, 0)
+            self.supports_bidir = ver >= (3, 7, 0)
+
+        # Detect optional flags for compatibility across builds/packagers.
+        try:
+            help_proc = subprocess.run(
+                [self.iperf3_bin, '--help'],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                timeout=3,
+                check=False,
+            )
+            help_l = (help_proc.stdout or '').lower()
+            if help_l:
+                self.supports_forceflush = '--forceflush' in help_l
+                self.supports_bidir = '--bidir' in help_l
+        except Exception:
+            pass
 
         class ReuseThreadingHTTPServer(ThreadingHTTPServer):
             allow_reuse_address = True
