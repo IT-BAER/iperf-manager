@@ -44,6 +44,7 @@ $TaskDescription = "iperf-manager Agent (headless) - network performance testing
 $ConfigDir      = Join-Path $InstallDir "config\iperf3-agent"
 $LogDir         = Join-Path $InstallDir "logs"
 $RepoUrl        = "https://github.com/IT-BAER/iperf-manager.git"
+$RepoZipUrl     = "https://github.com/IT-BAER/iperf-manager/archive/refs/heads/main.zip"
 $Iperf3Dir      = Join-Path $InstallDir "iperf3"
 $FwRulePrefix   = "iperf-manager"
 $Iperf3Release  = "https://api.github.com/repos/ar51an/iperf3-win-builds/releases/latest"
@@ -344,7 +345,20 @@ if (Test-Path $iperf3Exe) {
 Write-Step "Setting up repository in $InstallDir ..."
 $gitDir = Join-Path $InstallDir ".git"
 
-if (Test-Path $gitDir) {
+$gitCmd = Get-Command "git" -ErrorAction SilentlyContinue
+if (-not $gitCmd) {
+    Write-Warn "Git not found. Attempting automatic installation ..."
+    try {
+        Install-Git
+    } catch {
+        Write-Err "Automatic Git install failed: $_"
+    }
+    $gitCmd = Get-Command "git" -ErrorAction SilentlyContinue
+}
+
+$canUseGit = $null -ne $gitCmd
+
+if ($canUseGit -and (Test-Path $gitDir)) {
     Write-Step "Repository exists - pulling latest changes ..."
     & git -C $InstallDir fetch --quiet origin 2>$null
     $resetResult = & git -C $InstallDir reset --hard origin/main --quiet 2>&1
@@ -352,21 +366,7 @@ if (Test-Path $gitDir) {
         & git -C $InstallDir reset --hard origin/master --quiet 2>$null
     }
     Write-Ok "Repository updated"
-} else {
-    $gitCmd = Get-Command "git" -ErrorAction SilentlyContinue
-    if (-not $gitCmd) {
-        Write-Warn "Git not found. Attempting automatic installation ..."
-        try {
-            Install-Git
-        } catch {
-            Write-Err "Automatic Git install failed: $_"
-        }
-        $gitCmd = Get-Command "git" -ErrorAction SilentlyContinue
-    }
-    if (-not $gitCmd) {
-        Write-Err "Git is not installed. Install Git from https://git-scm.com/download/win"
-        exit 1
-    }
+} elseif ($canUseGit) {
     # Preserve iperf3 and config dirs if they already exist
     $preserveDirs = @($Iperf3Dir, $ConfigDir, $LogDir) | Where-Object { Test-Path $_ }
     $tempBackups = @{}
@@ -386,6 +386,46 @@ if (Test-Path $gitDir) {
         Copy-Item -Path $entry.Value -Destination $entry.Key -Recurse -Force
         Remove-Item -Path $entry.Value -Recurse -Force
     }
+} else {
+    Write-Warn "Git is unavailable. Falling back to repository ZIP download ..."
+
+    # Preserve iperf3 and config dirs if they already exist
+    $preserveDirs = @($Iperf3Dir, $ConfigDir, $LogDir) | Where-Object { Test-Path $_ }
+    $tempBackups = @{}
+    foreach ($dir in $preserveDirs) {
+        $backupPath = Join-Path $env:TEMP ("iperf-backup-" + (Split-Path $dir -Leaf))
+        if (Test-Path $backupPath) { Remove-Item -Path $backupPath -Recurse -Force }
+        Copy-Item -Path $dir -Destination $backupPath -Recurse -Force
+        $tempBackups[$dir] = $backupPath
+    }
+
+    $zipPath = Join-Path $env:TEMP "iperf-manager-main.zip"
+    $extractPath = Join-Path $env:TEMP "iperf-manager-main-extract"
+    if (Test-Path $zipPath) { Remove-Item -Path $zipPath -Force }
+    if (Test-Path $extractPath) { Remove-Item -Path $extractPath -Recurse -Force }
+
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest -Uri $RepoZipUrl -OutFile $zipPath -UseBasicParsing
+    Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+
+    $sourceDir = Get-ChildItem -Path $extractPath -Directory | Select-Object -First 1
+    if (-not $sourceDir) {
+        Write-Err "Repository archive extraction failed"
+        exit 1
+    }
+
+    if (Test-Path $InstallDir) { Remove-Item -Path $InstallDir -Recurse -Force }
+    New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+    Copy-Item -Path (Join-Path $sourceDir.FullName "*") -Destination $InstallDir -Recurse -Force
+    Write-Ok "Repository extracted to $InstallDir"
+
+    foreach ($entry in $tempBackups.GetEnumerator()) {
+        Copy-Item -Path $entry.Value -Destination $entry.Key -Recurse -Force
+        Remove-Item -Path $entry.Value -Recurse -Force
+    }
+
+    Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path $extractPath -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 # ── 4. Create configuration ─────────────────────────────────────────
