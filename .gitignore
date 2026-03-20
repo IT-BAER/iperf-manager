@@ -37,9 +37,6 @@ cygcrypto-3.dll
 # User-specific data
 data/last_profile.json
 
-# Claude Code local config
-.claude/
-
 # Frontend build
 web/frontend/node_modules/
 web/frontend/dist/
@@ -48,10 +45,9 @@ web/frontend/dist/
 _tmp_*.json
 *.tmp
 
-# Local Copilot agent instructions
+# Local instruction files
 .github/instructions/
 *.instructions.md
 *.prompt.md
 *.agent.md
 AGENTS.md
-copilot-instructions.md
