@@ -214,7 +214,7 @@ else
 fi
 
 info 'Creating/updating systemd service ...'
-WEB_PORT="$SERVICE_PORT" "${INSTALL_DIR}/deploy/setup-web-service.sh"
+WEB_PORT="$SERVICE_PORT" bash "${INSTALL_DIR}/deploy/setup-web-service.sh"
 
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -q 'active'; then
 	ufw allow "${SERVICE_PORT}/tcp" comment 'iperf-manager web dashboard' >/dev/null 2>&1 || true
