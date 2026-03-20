@@ -4,6 +4,7 @@ set -euo pipefail
 SERVICE_NAME=iperf-web
 SERVICE_FILE=/etc/systemd/system/${SERVICE_NAME}.service
 HASH_PYTHON_BIN=python3
+DEFAULT_WEB_PORT=5000
 
 if [[ -x /opt/iperf-manager/venv/bin/python ]]; then
 	HASH_PYTHON_BIN=/opt/iperf-manager/venv/bin/python
@@ -13,6 +14,11 @@ read_service_env() {
 	local name="$1"
 	[[ -f "$SERVICE_FILE" ]] || return 0
 	sed -n "s/^Environment=${name}=//p" "$SERVICE_FILE" | tail -n 1
+}
+
+read_service_port() {
+	[[ -f "$SERVICE_FILE" ]] || return 0
+	sed -n 's/^ExecStart=.* --port \([0-9][0-9]*\)$/\1/p' "$SERVICE_FILE" | tail -n 1
 }
 
 env_flag_is_enabled() {
@@ -35,6 +41,7 @@ EXISTING_AUTH_PASSWORD=$(read_service_env DASHBOARD_AUTH_PASSWORD)
 EXISTING_AUTH_PASSWORD_HASH=$(read_service_env DASHBOARD_AUTH_PASSWORD_HASH)
 EXISTING_AUTH_DISABLED=$(read_service_env DASHBOARD_AUTH_DISABLE)
 EXISTING_COOKIE_SECURE=$(read_service_env SESSION_COOKIE_SECURE)
+EXISTING_WEB_PORT=$(read_service_port)
 
 FLASK_KEY=${EXISTING_FLASK_KEY:-$(python3 -c "import secrets; print(secrets.token_hex(32), end='')")}
 AUTH_USER=${DASHBOARD_AUTH_USERNAME:-$EXISTING_AUTH_USER}
@@ -42,6 +49,8 @@ AUTH_PASSWORD=${DASHBOARD_AUTH_PASSWORD:-$EXISTING_AUTH_PASSWORD}
 AUTH_PASSWORD_HASH=${DASHBOARD_AUTH_PASSWORD_HASH:-$EXISTING_AUTH_PASSWORD_HASH}
 AUTH_DISABLED=${DASHBOARD_AUTH_DISABLE:-}
 COOKIE_SECURE=${SESSION_COOKIE_SECURE:-$EXISTING_COOKIE_SECURE}
+WEB_PORT=${WEB_PORT:-$EXISTING_WEB_PORT}
+WEB_PORT=${WEB_PORT:-$DEFAULT_WEB_PORT}
 AUTH_DISABLED_FLAG=false
 AUTH_GENERATED=false
 AUTH_REUSED_EXISTING=false
@@ -87,7 +96,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/iperf-manager
-ExecStart=/opt/iperf-manager/venv/bin/python main_web.py --host 0.0.0.0 --port 5000
+ExecStart=/opt/iperf-manager/venv/bin/python main_web.py --host 0.0.0.0 --port ${WEB_PORT}
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
@@ -141,4 +150,5 @@ elif $AUTH_REUSED_EXISTING; then
 else
 	echo "Dashboard auth : enabled for username ${AUTH_USER}"
 fi
+echo "Dashboard port : ${WEB_PORT}"
 systemctl --no-pager status "$SERVICE_NAME" || true
