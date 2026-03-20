@@ -4,21 +4,70 @@ This repository ships three deployment helpers:
 
 - `deploy/install-agent-linux.sh` for Linux agents (`iperf-agent` systemd service)
 - `deploy/Install-Agent.ps1` for Windows agents (`iperf-agent` scheduled task)
+- `deploy/install-web-linux.sh` for one-shot Linux web dashboard bootstrap + service setup
 - `deploy/setup-web-service.sh` for the Linux web dashboard (`iperf-web` systemd service)
+
+## One-Line Lifecycle Commands
+
+### Linux web dashboard (Debian, Ubuntu, Proxmox)
+
+Install:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/swc00057/iperf-manager/main/deploy/install-web-linux.sh | sudo bash
+```
+
+Install with parameters (port + dashboard credentials):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/swc00057/iperf-manager/main/deploy/install-web-linux.sh \
+  | sudo DASHBOARD_AUTH_USERNAME=admin DASHBOARD_AUTH_PASSWORD='change-me' \
+    bash -s -- --port 5000
+```
+
+Update (idempotent):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/swc00057/iperf-manager/main/deploy/install-web-linux.sh \
+  | sudo bash -s -- --update
+```
+
+Uninstall service only:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/swc00057/iperf-manager/main/deploy/install-web-linux.sh \
+  | sudo bash -s -- --uninstall
+```
+
+Uninstall and purge `/opt/iperf-manager`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/swc00057/iperf-manager/main/deploy/install-web-linux.sh \
+  | sudo bash -s -- --uninstall --purge
+```
 
 ## Agent Quick Start
 
 ### Linux agent (Debian, Ubuntu, Proxmox)
 
+Install:
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-agent-linux.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/swc00057/iperf-manager/main/deploy/install-agent-linux.sh | sudo bash
 ```
 
-With parameters:
+Install or update with parameters:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-agent-linux.sh \
+curl -fsSL https://raw.githubusercontent.com/swc00057/iperf-manager/main/deploy/install-agent-linux.sh \
   | sudo bash -s -- --token "mySecretKey" --port 9001 --iperf-ports "5211,5212"
+```
+
+Uninstall:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/swc00057/iperf-manager/main/deploy/install-agent-linux.sh \
+  | sudo bash -s -- --uninstall
 ```
 
 For staged local-tree rollouts, extract the repo to `/opt/iperf-manager` first and then run:
@@ -32,16 +81,22 @@ That mode keeps the staged local tree instead of resetting the host back to GitH
 
 ### Windows agent (PowerShell as Administrator)
 
+Install:
+
 ```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force
-iwr -useb https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/Install-Agent.ps1 -OutFile $env:TEMP\Install-Agent.ps1
-& $env:TEMP\Install-Agent.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/swc00057/iperf-manager/main/deploy/Install-Agent.ps1 | iex"
 ```
 
-With parameters:
+Install or update with parameters:
 
 ```powershell
-& $env:TEMP\Install-Agent.ps1 -Token "mySecretKey" -Port 9001 -IperfPorts "5211,5212"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/swc00057/iperf-manager/main/deploy/Install-Agent.ps1 -OutFile $env:TEMP\Install-Agent.ps1; & $env:TEMP\Install-Agent.ps1 -Token 'mySecretKey' -Port 9001 -IperfPorts '5211,5212'"
+```
+
+Uninstall:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/swc00057/iperf-manager/main/deploy/Install-Agent.ps1 -OutFile $env:TEMP\Install-Agent.ps1; & $env:TEMP\Install-Agent.ps1 -Uninstall"
 ```
 
 ## Security Notes
@@ -59,7 +114,7 @@ With parameters:
 ```bash
 sudo apt update
 sudo apt install -y iperf3 git python3
-sudo git clone https://github.com/IT-BAER/iperf-manager.git /opt/iperf-manager
+sudo git clone https://github.com/swc00057/iperf-manager.git /opt/iperf-manager
 
 # optional smoke test before installing the service
 sudo LOCALAPPDATA=/etc/iperf-manager python3 /opt/iperf-manager/main_agent.py --host 0.0.0.0 --port 9001
@@ -71,7 +126,7 @@ sudo bash /opt/iperf-manager/deploy/install-agent-linux.sh
 ### Windows
 
 ```powershell
-git clone https://github.com/IT-BAER/iperf-manager.git C:\iperf-manager
+git clone https://github.com/swc00057/iperf-manager.git C:\iperf-manager
 
 # optional smoke test before registering the scheduled task
 cd C:\iperf-manager
@@ -179,6 +234,8 @@ The generated service runs:
 ```bash
 /opt/iperf-manager/venv/bin/python main_web.py --host 0.0.0.0 --port 5000
 ```
+
+The default dashboard port is `5000`. To use another port, rerun either installer with `--port` (for `install-web-linux.sh`) or set `WEB_PORT` when calling `setup-web-service.sh` directly.
 
 Verify it with:
 

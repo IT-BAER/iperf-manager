@@ -59,6 +59,55 @@ Dashboard flow:
 - `iperf3` installed on every agent host
 - Node.js only if you are rebuilding the React frontend
 
+### One-liner install/update/uninstall (service deployment)
+
+Linux Web UI:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/swc00057/iperf-manager/main/deploy/install-web-linux.sh | sudo bash
+```
+
+Linux Web UI update:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/swc00057/iperf-manager/main/deploy/install-web-linux.sh \
+  | sudo bash -s -- --update
+```
+
+Linux Web UI uninstall:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/swc00057/iperf-manager/main/deploy/install-web-linux.sh \
+  | sudo bash -s -- --uninstall
+```
+
+Linux agent:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/swc00057/iperf-manager/main/deploy/install-agent-linux.sh | sudo bash
+```
+
+Linux agent uninstall:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/swc00057/iperf-manager/main/deploy/install-agent-linux.sh \
+  | sudo bash -s -- --uninstall
+```
+
+Windows agent (PowerShell as Administrator):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/swc00057/iperf-manager/main/deploy/Install-Agent.ps1 | iex"
+```
+
+Windows agent uninstall:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/swc00057/iperf-manager/main/deploy/Install-Agent.ps1 -OutFile $env:TEMP\Install-Agent.ps1; & $env:TEMP\Install-Agent.ps1 -Uninstall"
+```
+
+For parameterized install/update commands (token, ports, branch, repo URL, skip build/sync) and staged rollouts, see [deploy/README-deploy.md](deploy/README-deploy.md).
+
 ### 1. Start one or more agents
 
 ```bash
@@ -221,10 +270,11 @@ iperf-manager/
   deploy/
     install-agent-linux.sh
     Install-Agent.ps1
+    install-web-linux.sh
     setup-web-service.sh
 ```
 
-> This repository originated from [swc00057/iperf-manager](https://github.com/swc00057/iperf-manager). It has since diverged into a server-hosted web dashboard with headless agents rather than the original client-oriented application.
+> This is a standalone repository for a server-hosted web dashboard and headless iperf agents.
 
 ## License
 
