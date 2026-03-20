@@ -3,7 +3,7 @@
 set -euo pipefail
 
 INSTALL_DIR='/opt/iperf-manager'
-REPO_URL='https://github.com/swc00057/iperf-manager.git'
+REPO_URL='https://github.com/IT-BAER/iperf-manager.git'
 BRANCH='main'
 SERVICE_NAME='iperf-web'
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
