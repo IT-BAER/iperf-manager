@@ -14,7 +14,7 @@ CONFIG_DIR="/etc/iperf-manager"
 LOG_DIR="/var/log/iperf-manager"
 SERVICE_NAME="iperf-agent"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
-REPO_URL="https://github.com/IT-BAER/iperf-manager.git"
+REPO_URL="https://github.com/swc00057/iperf-manager.git"
 UNINSTALL=false
 TOKEN_GENERATED=false
 SKIP_REPO_SYNC=${IPERF_MANAGER_SKIP_REPO_SYNC:-}
@@ -222,7 +222,7 @@ fi
 cat > "$SERVICE_FILE" <<SVCEOF
 [Unit]
 Description=iperf-manager Agent (headless)
-Documentation=https://github.com/IT-BAER/iperf-manager
+Documentation=https://github.com/swc00057/iperf-manager
 After=network-online.target
 Wants=network-online.target
 
