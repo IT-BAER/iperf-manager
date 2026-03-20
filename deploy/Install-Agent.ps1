@@ -122,9 +122,31 @@ function Install-Python {
     Invoke-WebRequest -Uri $PythonInstallerUrl -OutFile $installerPath -UseBasicParsing
 
     Write-Step "Installing Python silently ..."
-    & $installerPath /quiet InstallAllUsers=1 PrependPath=1 Include_test=0
+    Start-Process -FilePath $installerPath -ArgumentList "/quiet InstallAllUsers=1 PrependPath=1 Include_test=0" -Wait
+
+    # Some Python installers return before path propagation; wait for the binary.
+    $pythonCandidates = @(
+        "C:\\Program Files\\Python312\\python.exe",
+        "C:\\Program Files\\Python311\\python.exe",
+        "C:\\Program Files\\Python310\\python.exe",
+        "C:\\Python312\\python.exe",
+        "C:\\Python311\\python.exe",
+        "C:\\Python310\\python.exe"
+    )
+    $pythonReady = $false
+    for ($i = 0; $i -lt 36; $i++) {
+        if ($pythonCandidates | Where-Object { Test-Path $_ }) {
+            $pythonReady = $true
+            break
+        }
+        Start-Sleep -Seconds 5
+    }
+
     Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue
     Refresh-Path
+    if (-not $pythonReady) {
+        throw "Python installer finished but python.exe was not detected in common install paths"
+    }
 }
 
 function Install-Git {
@@ -134,9 +156,20 @@ function Install-Git {
     Invoke-WebRequest -Uri $GitInstallerUrl -OutFile $installerPath -UseBasicParsing
 
     Write-Step "Installing Git silently ..."
-    & $installerPath /VERYSILENT /NORESTART /NOCANCEL /SP-
+    Start-Process -FilePath $installerPath -ArgumentList "/VERYSILENT /NORESTART /NOCANCEL /SP-" -Wait
     Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue
     Refresh-Path
+
+    # Ensure current session can find git immediately after install.
+    foreach ($gitPath in @("C:\\Program Files\\Git\\cmd\\git.exe", "C:\\Program Files\\Git\\bin\\git.exe")) {
+        if (Test-Path $gitPath) {
+            $gitDir = Split-Path $gitPath -Parent
+            if ($env:Path -notlike "*$gitDir*") {
+                $env:Path = "$gitDir;$env:Path"
+            }
+            break
+        }
+    }
 }
 
 function Test-Admin {
