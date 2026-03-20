@@ -173,6 +173,23 @@ function Install-Git {
     }
 }
 
+function Stop-AgentProcesses {
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if ($task -and $task.State -eq "Running") {
+        Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+    }
+
+    $agentProcs = Get-Process -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.Path -like "$InstallDir*" -or $_.CommandLine -like "*main_agent.py*"
+        }
+
+    foreach ($proc in $agentProcs) {
+        Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Test-Admin {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [Security.Principal.WindowsPrincipal]$identity
@@ -344,6 +361,9 @@ if (Test-Path $iperf3Exe) {
 # ── 3. Clone or update repository ───────────────────────────────────
 Write-Step "Setting up repository in $InstallDir ..."
 $gitDir = Join-Path $InstallDir ".git"
+
+# Stop running agent processes to avoid file locks during update/replace.
+Stop-AgentProcesses
 
 $gitCmd = Get-Command "git" -ErrorAction SilentlyContinue
 if (-not $gitCmd) {
