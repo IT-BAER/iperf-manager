@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────────────
 #  iperf-manager  ·  Agent Deployment Script for Debian / Ubuntu / Proxmox
-#  Idempotent – safe to re-run.  Use --uninstall to remove everything.
+#  Idempotent – safe to re-run.  Use --uninstall to remove service/runtime files.
+#  Add --purge with --uninstall to also remove the install tree.
 # ──────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -16,6 +17,7 @@ SERVICE_NAME="iperf-agent"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 REPO_URL="https://github.com/IT-BAER/iperf-manager.git"
 UNINSTALL=false
+PURGE_INSTALL_DIR=false
 TOKEN_GENERATED=false
 SKIP_REPO_SYNC=${IPERF_MANAGER_SKIP_REPO_SYNC:-}
 SKIP_REPO_SYNC_FLAG=false
@@ -45,13 +47,15 @@ Options:
   --token <api_key>          API key for agent authentication
   --port <port>              REST API port (default: 9001)
   --iperf-ports <p1,p2,...>  iperf3 autostart ports (default: 5211,5212)
-  --uninstall                Remove agent, service, config and firewall rules
+    --uninstall                Remove service, config, log dir, and firewall rules
+    --purge                    With --uninstall, also remove ${INSTALL_DIR}
   -h, --help                 Show this help
 
 Examples:
   sudo bash install-agent-linux.sh
   sudo bash install-agent-linux.sh --token mySecretKey --port 9001
   sudo bash install-agent-linux.sh --uninstall
+    sudo bash install-agent-linux.sh --uninstall --purge
 EOF
     exit 0
 }
@@ -62,10 +66,15 @@ while [[ $# -gt 0 ]]; do
         --port)        API_PORT="$2";    shift 2 ;;
         --iperf-ports) IPERF_PORTS="$2"; shift 2 ;;
         --uninstall)   UNINSTALL=true;   shift   ;;
+        --purge)       PURGE_INSTALL_DIR=true; shift ;;
         -h|--help)     usage ;;
         *) die "Unknown option: $1  (use --help)" ;;
     esac
 done
+
+if $PURGE_INSTALL_DIR && ! $UNINSTALL; then
+    warn "--purge has no effect without --uninstall"
+fi
 
 # ── Root Check ───────────────────────────────────────────────────────
 [[ $EUID -eq 0 ]] || die "This script must be run as root (use sudo)."
@@ -105,13 +114,21 @@ if $UNINSTALL; then
         ok "Removed ufw iperf3 port rules"
     fi
 
-    # Remove directories (prompt for confirmation)
-    for dir in "$INSTALL_DIR" "$CONFIG_DIR" "$LOG_DIR"; do
+    # Remove runtime directories
+    for dir in "$CONFIG_DIR" "$LOG_DIR"; do
         if [[ -d "$dir" ]]; then
             rm -rf "$dir"
             ok "Removed $dir"
         fi
     done
+
+    # Keep repository tree by default to avoid disrupting co-hosted services
+    if $PURGE_INSTALL_DIR && [[ -d "$INSTALL_DIR" ]]; then
+        rm -rf "$INSTALL_DIR"
+        ok "Removed $INSTALL_DIR"
+    elif [[ -d "$INSTALL_DIR" ]]; then
+        warn "Kept ${INSTALL_DIR}. Use --purge with --uninstall to remove it."
+    fi
 
     echo ""
     ok "iperf-manager agent uninstalled successfully."

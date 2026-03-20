@@ -94,6 +94,8 @@ curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/i
   | sudo bash -s -- --uninstall
 ```
 
+Add `--purge` to also remove `/opt/iperf-manager`.
+
 Windows agent (PowerShell as Administrator):
 
 ```powershell
