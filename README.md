@@ -59,35 +59,39 @@ Dashboard flow:
 - `iperf3` installed on every agent host
 - Node.js only if you are rebuilding the React frontend
 
-### One-liner install/update/uninstall (service deployment)
+### Service Deployment (One-Liners)
 
-Linux Web UI:
+#### Linux web dashboard
+
+Install:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-web-linux.sh | sudo bash
 ```
 
-Linux Web UI update:
+Update:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-web-linux.sh \
   | sudo bash -s -- --update
 ```
 
-Linux Web UI uninstall:
+Uninstall:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-web-linux.sh \
   | sudo bash -s -- --uninstall
 ```
 
-Linux agent:
+#### Linux agent
+
+Install:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-agent-linux.sh | sudo bash
 ```
 
-Linux agent uninstall:
+Uninstall:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-agent-linux.sh \
@@ -96,21 +100,41 @@ curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/i
 
 Add `--purge` to also remove `/opt/iperf-manager`.
 
-Windows agent (PowerShell as Administrator):
+#### Windows agent (PowerShell as Administrator)
+
+Install:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/Install-Agent.ps1 | iex"
 ```
 
-If Python or Git is missing, the Windows installer attempts to install them automatically.
-
-Windows agent uninstall:
+Uninstall:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/Install-Agent.ps1 -OutFile $env:TEMP\Install-Agent.ps1; & $env:TEMP\Install-Agent.ps1 -Uninstall"
 ```
 
-For parameterized install/update commands (token, ports, branch, repo URL, skip build/sync) and staged rollouts, see [deploy/README-deploy.md](deploy/README-deploy.md).
+If Python or Git is missing, the Windows installer attempts to install them automatically.
+
+For parameterized install/update commands (token, ports, branch, repo URL, skip build/sync), see [deploy/README-deploy.md](deploy/README-deploy.md).
+
+### Required Network Ports (Firewall)
+
+At minimum, allow the dashboard host to reach agent management and discovery:
+
+- UDP `9999` for agent discovery
+- TCP `9001` for agent REST API
+
+For test traffic, allow iperf3 ports between your selected server and client agents:
+
+- TCP and UDP iperf3 port range used by your test config (`base_port` + client count)
+- Default behavior starts from `5211`; many setups allow a wider range such as `5201-5299`
+
+Example firewall rules (segmented setup):
+
+- UDP `9999` -> `<IPERF_AGENT_NETWORKS>`
+- TCP `9001` -> `<IPERF_AGENT_NETWORKS>`
+- TCP `5201-5299` -> `<IPERF_AGENT_NETWORKS>`
 
 ### 1. Start one or more agents
 
