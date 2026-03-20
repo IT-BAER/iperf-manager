@@ -378,33 +378,74 @@ def _refresh_agent(aid: str, info: dict) -> dict:
 
 
 def _discover_agents(timeout: float = 3.0) -> list[dict]:
-    """Send UDP broadcast and collect agent responses."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    sock.settimeout(timeout)
-    found: list[dict] = []
-    try:
-        sock.sendto(b"IPERF3_DISCOVER", ("<broadcast>", DISCOVER_PORT))
-        while True:
-            try:
-                data, addr = sock.recvfrom(4096)
-                info = json.loads(data.decode())
-                url = info.get("base", f"http://{addr[0]}:{DEFAULT_API_PORT}")
-                found.append({
-                    "url": url,
-                    "name": info.get("name", addr[0]),
-                    "version": info.get("version", ""),
-                    "ips": info.get("ips", [addr[0]]),
-                    "interfaces": info.get("interfaces", []),
-                    "servers": info.get("servers", []),
-                })
-            except socket.timeout:
-                break
-    except Exception:
-        pass
-    finally:
-        sock.close()
-    return found
+    """Discover agents via UDP broadcast, with unicast /24 fallback."""
+    found_by_url: dict[str, dict] = {}
+
+    def _record_packet(data: bytes, addr: tuple[str, int]) -> None:
+        try:
+            info = json.loads(data.decode())
+        except Exception:
+            return
+
+        url = info.get("base", f"http://{addr[0]}:{DEFAULT_API_PORT}")
+        if not isinstance(url, str) or not url:
+            return
+
+        found_by_url[url] = {
+            "url": url,
+            "name": info.get("name", addr[0]),
+            "version": info.get("version", ""),
+            "ips": info.get("ips", [addr[0]]),
+            "interfaces": info.get("interfaces", []),
+            "servers": info.get("servers", []),
+        }
+
+    def _probe(targets: list[tuple[str, int]], recv_timeout: float) -> None:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        try:
+            for host, port in targets:
+                try:
+                    sock.sendto(b"IPERF3_DISCOVER", (host, port))
+                except OSError:
+                    continue
+
+            deadline = time.time() + max(0.1, recv_timeout)
+            while time.time() < deadline:
+                sock.settimeout(max(0.05, deadline - time.time()))
+                try:
+                    data, addr = sock.recvfrom(4096)
+                except socket.timeout:
+                    break
+                _record_packet(data, addr)
+        finally:
+            sock.close()
+
+    _probe([("<broadcast>", DISCOVER_PORT), ("255.255.255.255", DISCOVER_PORT)], timeout)
+
+    # Some bridge/firewall setups suppress broadcast packets between containers.
+    if not found_by_url:
+        local_ip = ""
+        probe_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            probe_sock.connect(("10.255.255.255", 1))
+            local_ip = probe_sock.getsockname()[0]
+        except OSError:
+            pass
+        finally:
+            probe_sock.close()
+
+        octets = local_ip.split(".")
+        if len(octets) == 4 and all(part.isdigit() for part in octets):
+            prefix = ".".join(octets[:3])
+            targets = [
+                (f"{prefix}.{host}", DISCOVER_PORT)
+                for host in range(1, 255)
+                if f"{prefix}.{host}" != local_ip
+            ]
+            _probe(targets, min(timeout, 2.0))
+
+    return list(found_by_url.values())
 
 
 # ╔══════════════════════════════════════════════════════════════════════╗
