@@ -17,6 +17,7 @@ import io
 import sys
 import signal
 import atexit
+import ipaddress
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 from pathlib import Path
@@ -107,6 +108,7 @@ class AgentService:
         self.version_str = ''
         self.supports_forceflush = True
         self.supports_bidir = True
+        self.supports_bind_dev = False
         self._hooks_registered = False
 
         # --- regex patterns for parsing iperf3 output ---
@@ -226,6 +228,42 @@ class AgentService:
         except Exception:
             return None
 
+    @staticmethod
+    def _is_ip_literal(value: str) -> bool:
+        raw = str(value or '').strip()
+        if not raw:
+            return False
+        candidate = raw.split('%', 1)[0]
+        try:
+            ipaddress.ip_address(candidate)
+            return True
+        except ValueError:
+            return False
+
+    def _resolve_bind_value(self, bind_value: str | None) -> tuple[str | None, str | None]:
+        raw = str(bind_value or '').strip()
+        if not raw:
+            return None, None
+
+        if self._is_ip_literal(raw):
+            return raw, None
+
+        # Accept interface names from UI/profile payloads and map them to IPv4.
+        try:
+            interfaces = list_local_interfaces(exclude_loopback=False)
+        except Exception:
+            interfaces = []
+
+        raw_l = raw.lower()
+        for entry in interfaces:
+            iface = str(entry.get('iface') or '').strip()
+            ip = str(entry.get('ip') or '').strip()
+            if iface and iface.lower() == raw_l and ip:
+                return ip, iface
+
+        # Could not resolve to an IP, keep as interface hint for --bind-dev fallback.
+        return None, raw
+
     # ------------------------------------------------------------------ #
     # Server process management (--one-off with auto-restart)
     # ------------------------------------------------------------------ #
@@ -271,8 +309,16 @@ class AgentService:
     def _start_server_port(self, port: int, bind_ip: str = None):
         log = os.path.join(self.LOG_DIR, f'server_{port}_{self._now_ts()}.log')
         cmd = [self.iperf3_bin, '-s', '-p', str(int(port))]
-        if bind_ip:
-            cmd += ['-B', str(bind_ip)]
+        resolved_bind_ip, bind_dev = self._resolve_bind_value(bind_ip)
+        if resolved_bind_ip:
+            cmd += ['-B', resolved_bind_ip]
+        elif bind_dev and self.supports_bind_dev:
+            cmd += ['--bind-dev', bind_dev]
+        elif bind_dev:
+            raise ValueError(
+                f'bind interface "{bind_dev}" requires iperf3 --bind-dev support '
+                'or an interface IPv4 address'
+            )
 
         lf = open(log, 'ab')
         try:
@@ -416,6 +462,8 @@ class AgentService:
                     break
         if 'bind' not in t and 'bind_ip' in t:
             t['bind'] = t['bind_ip']
+        if 'bind' not in t and 'bind_interface' in t:
+            t['bind'] = t['bind_interface']
         if 'reverse' in t and isinstance(t['reverse'], str):
             t['reverse'] = t['reverse'].lower() in ('1', 'true', 'yes', 'on', 'y')
         if 'bidir' in t and isinstance(t['bidir'], str):
@@ -501,8 +549,16 @@ class AgentService:
             args.append('-Z')
         if task.get('window'):
             args += ['-w', str(task['window'])]
-        if task.get('bind'):
-            args += ['-B', str(task['bind'])]
+        bind_ip, bind_dev = self._resolve_bind_value(task.get('bind'))
+        if bind_ip:
+            args += ['-B', bind_ip]
+        elif bind_dev and self.supports_bind_dev:
+            args += ['--bind-dev', bind_dev]
+        elif bind_dev:
+            raise ValueError(
+                f'bind interface "{bind_dev}" requires iperf3 --bind-dev support '
+                'or an interface IPv4 address'
+            )
         if task.get('extra_args'):
             allowed = {
                 '--tos', '--dscp', '--dont-fragment', '--no-delay',
@@ -913,6 +969,7 @@ class AgentService:
         self.stop_flag = False
         self.supports_forceflush = True
         self.supports_bidir = True
+        self.supports_bind_dev = False
         try:
             self.iperf3_bin = resolve_iperf3_path(self.iperf3_bin)
             ver_out = subprocess.check_output(
@@ -943,6 +1000,7 @@ class AgentService:
             if help_l:
                 self.supports_forceflush = '--forceflush' in help_l
                 self.supports_bidir = '--bidir' in help_l
+                self.supports_bind_dev = '--bind-dev' in help_l
         except Exception:
             pass
 
