@@ -39,6 +39,11 @@ export default function TestConfigPanel({
 
   const isRunning = testState.status !== 'idle'
   const canStart = Boolean(config.server_agent) && config.clients.length > 0
+  const canSwapOneToOne = !isRunning
+    && Boolean(config.server_agent)
+    && config.clients.length === 1
+    && Boolean(config.clients[0]?.agent)
+    && config.clients[0]?.agent !== config.server_agent
 
   // Keep parent in sync
   const onConfigChangeRef = useRef(onConfigChange)
@@ -68,6 +73,38 @@ export default function TestConfigPanel({
       ...prev,
       clients: prev.clients.map((r, i) => i === idx ? { ...r, [key]: value } : r),
     }))
+  }
+
+  const swapOneToOneRoles = () => {
+    setConfig(prev => {
+      if (!prev.server_agent || prev.clients.length !== 1) return prev
+
+      const client = prev.clients[0]
+      if (!client.agent || client.agent === prev.server_agent) return prev
+
+      const oldServerAgent = prev.server_agent
+      const oldServerBind = (prev.server_bind || '').trim()
+      const oldServerApiKey = prev.api_key || ''
+      const oldClientBind = (client.bind || '').trim()
+      const oldClientApiKey = client.api_key || ''
+
+      return {
+        ...prev,
+        server_agent: client.agent,
+        server_bind: oldClientBind,
+        api_key: oldClientApiKey,
+        clients: [
+          {
+            ...client,
+            agent: oldServerAgent,
+            name: agents[oldServerAgent]?.name || client.name || '',
+            bind: oldServerBind,
+            server_target: '',
+            api_key: oldServerApiKey,
+          },
+        ],
+      }
+    })
   }
 
   // CSS helpers
@@ -312,6 +349,17 @@ export default function TestConfigPanel({
               <span className="text-[12px] text-fg-3 ml-1">
                 {config.server_agent ? 'Add at least one client agent to start' : 'Select a server agent to start'}
               </span>
+            )}
+            {canSwapOneToOne && (
+              <button
+                className="btn ml-auto"
+                disabled={isRunning}
+                onClick={swapOneToOneRoles}
+                title="Swap selected server and client (1:1 only)"
+              >
+                <i className="fa-solid fa-right-left text-[11px]" />
+                Swap 1:1
+              </button>
             )}
           </div>
         </div>

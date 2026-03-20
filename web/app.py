@@ -530,12 +530,14 @@ def _normalize_config(raw: dict) -> dict:
 
     mode = _MODE_MAP.get(raw.get("mode", ""), raw.get("mode", ""))
 
+    server_bind = str(raw.get("server_bind", "") or "").strip()
+
     clients = []
     for c in raw.get("clients", []):
         agent_id = c.get("agent", "")
         agent_info = agent_snapshot.get(agent_id, {})
         agent_api_key = str(agent_info.get("api_key", "") or "")
-        target = c.get("server_target") or c.get("target", "") or server_ip
+        target = c.get("server_target") or c.get("target", "") or server_bind or server_ip
         client_entry: dict = {
             "agent": _resolve_agent_url(agent_id) if agent_id else "",
             "name": c.get("name") or agent_id,
@@ -550,7 +552,7 @@ def _normalize_config(raw: dict) -> dict:
         "server": {
             "agent": server_url,
             "name": server_name,
-            "bind": raw.get("server_bind", ""),
+            "bind": server_bind,
             "api_key": raw.get("api_key", "") or server_api_key,
         },
         "clients": clients,

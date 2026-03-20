@@ -266,8 +266,9 @@ export function App() {
         setMetricsHistory([])
         setLogs([])
       }),
-      on('test_completed', () => {
-        setTestState(prev => ({ ...prev, status: 'idle', finished_at: Date.now() / 1000 }))
+      on('test_completed', (data: unknown) => {
+        const d = data as { ts?: number }
+        setTestState(prev => ({ ...prev, status: 'idle', finished_at: d?.ts ?? Date.now() / 1000 }))
       }),
       on('test_error', (data: unknown) => {
         const d = data as { message: string; ts: number }
