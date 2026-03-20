@@ -64,46 +64,46 @@ Dashboard flow:
 Linux Web UI:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/swc00057/iperf-manager/main/deploy/install-web-linux.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-web-linux.sh | sudo bash
 ```
 
 Linux Web UI update:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/swc00057/iperf-manager/main/deploy/install-web-linux.sh \
+curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-web-linux.sh \
   | sudo bash -s -- --update
 ```
 
 Linux Web UI uninstall:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/swc00057/iperf-manager/main/deploy/install-web-linux.sh \
+curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-web-linux.sh \
   | sudo bash -s -- --uninstall
 ```
 
 Linux agent:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/swc00057/iperf-manager/main/deploy/install-agent-linux.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-agent-linux.sh | sudo bash
 ```
 
 Linux agent uninstall:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/swc00057/iperf-manager/main/deploy/install-agent-linux.sh \
+curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-agent-linux.sh \
   | sudo bash -s -- --uninstall
 ```
 
 Windows agent (PowerShell as Administrator):
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/swc00057/iperf-manager/main/deploy/Install-Agent.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/Install-Agent.ps1 | iex"
 ```
 
 Windows agent uninstall:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/swc00057/iperf-manager/main/deploy/Install-Agent.ps1 -OutFile $env:TEMP\Install-Agent.ps1; & $env:TEMP\Install-Agent.ps1 -Uninstall"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/Install-Agent.ps1 -OutFile $env:TEMP\Install-Agent.ps1; & $env:TEMP\Install-Agent.ps1 -Uninstall"
 ```
 
 For parameterized install/update commands (token, ports, branch, repo URL, skip build/sync) and staged rollouts, see [deploy/README-deploy.md](deploy/README-deploy.md).
