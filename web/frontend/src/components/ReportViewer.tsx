@@ -44,8 +44,6 @@ export default function ReportViewer({ filename, onBack }: ReportViewerProps) {
   const [sortDir, setSortDir] = useState<SortDir>('asc')
 
   useEffect(() => {
-    setLoading(true)
-    setError(null)
     api<{ columns: string[]; rows: Record<string, string>[] }>(`/api/reports/${encodeURIComponent(filename)}/data`)
       .then(data => {
         if (!data) {

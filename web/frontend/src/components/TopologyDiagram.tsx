@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import type { Agent, TestConfig, ClientRow, Metrics } from '../types'
 
 interface NI { iface: string; ip: string }
@@ -88,10 +88,13 @@ export default function TopologyDiagram({
   }, [])
 
   useEffect(() => {
-    recalcLines()
-    const obs = new ResizeObserver(recalcLines)
+    const frame = window.requestAnimationFrame(() => recalcLines())
+    const obs = new ResizeObserver(() => recalcLines())
     if (containerRef.current) obs.observe(containerRef.current)
-    return () => obs.disconnect()
+    return () => {
+      window.cancelAnimationFrame(frame)
+      obs.disconnect()
+    }
   }, [config.server_agent, config.clients.length, recalcLines])
 
   /* Drop zones */

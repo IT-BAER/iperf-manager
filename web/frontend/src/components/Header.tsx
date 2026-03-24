@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import type { Profile } from '../types'
 
 interface Props {
   connected: boolean
@@ -6,6 +7,12 @@ interface Props {
   onToggleSidebar: () => void
   activeTab: string
   onTabChange: (tab: 'test' | 'results' | 'reports') => void
+  profiles: Profile[]
+  activeProfile: string
+  onProfileChange: (name: string) => void
+  onProfileLoad: () => void
+  onProfileSave: () => void
+  onProfileDelete: () => void
   authUser?: string
   onLogout?: () => void
 }
@@ -15,7 +22,21 @@ const TABS = [
   { id: 'reports' as const, label: 'Reports' },
 ] as const
 
-export function Header({ connected, sidebarOpen, onToggleSidebar, activeTab, onTabChange, authUser, onLogout }: Props) {
+export function Header({
+  connected,
+  sidebarOpen,
+  onToggleSidebar,
+  activeTab,
+  onTabChange,
+  profiles,
+  activeProfile,
+  onProfileChange,
+  onProfileLoad,
+  onProfileSave,
+  onProfileDelete,
+  authUser,
+  onLogout,
+}: Props) {
   const navRef = useRef<HTMLElement | null>(null)
   const tabRefs = useRef<Array<HTMLSpanElement | null>>([])
   const [indicator, setIndicator] = useState({ left: 0, width: 0, opacity: 0 })
@@ -90,6 +111,50 @@ export function Header({ connected, sidebarOpen, onToggleSidebar, activeTab, onT
       </nav>
 
       <div className="flex-1" />
+
+      <div className="flex items-center gap-1 min-w-0 max-w-[48vw]">
+        <select
+          value={activeProfile}
+          onChange={e => onProfileChange(e.target.value)}
+          className="h-7 min-w-[130px] max-w-[220px] bg-bg border border-line rounded-sm px-2 text-[12px] text-fg"
+          aria-label="Select profile"
+          title="Select profile"
+        >
+          <option value="">Profile...</option>
+          {profiles.map(profile => (
+            <option key={profile.name} value={profile.name}>{profile.name}</option>
+          ))}
+        </select>
+
+        <button
+          onClick={onProfileLoad}
+          disabled={!activeProfile}
+          className="btn btn-sm w-7 px-0 justify-center"
+          aria-label="Load selected profile"
+          title="Load profile"
+        >
+          <i className="fa-solid fa-file-import text-[11px]" />
+        </button>
+
+        <button
+          onClick={onProfileSave}
+          className="btn btn-sm w-7 px-0 justify-center"
+          aria-label="Save current setup as profile"
+          title="Save profile"
+        >
+          <i className="fa-solid fa-floppy-disk text-[11px]" />
+        </button>
+
+        <button
+          onClick={onProfileDelete}
+          disabled={!activeProfile}
+          className="btn btn-sm w-7 px-0 justify-center"
+          aria-label="Delete selected profile"
+          title="Delete profile"
+        >
+          <i className="fa-solid fa-trash-can text-[11px]" />
+        </button>
+      </div>
 
       {authUser && onLogout && (
         <>

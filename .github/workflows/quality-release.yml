@@ -1,0 +1,129 @@
+name: Quality And Release
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: quality-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  quality:
+    name: Quality Checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Python dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+
+      - name: Python syntax and import checks
+        run: python -m py_compile main_agent.py main_web.py core/*.py web/app.py
+
+      - name: Python test discovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          if find . -type f -name "test_*.py" | grep -q .; then
+            python -m unittest discover -s . -p "test_*.py"
+          else
+            echo "No Python unit tests found. Skipping unittest discovery step."
+          fi
+
+      - name: Validate Keep a Changelog structure
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f CHANGELOG.md
+          grep -qE '^# Changelog' CHANGELOG.md
+          grep -qE '^## \[Unreleased\]' CHANGELOG.md
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm --prefix web/frontend ci
+
+      - name: Frontend lint
+        run: npm --prefix web/frontend run lint
+
+      - name: Frontend build
+        run: npm --prefix web/frontend run build
+
+  release:
+    name: Create GitHub Release
+    needs: quality
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate release changelog
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag_raw="${GITHUB_REF_NAME}"
+          tag="${tag_raw#v}"
+          notes_file="release_notes.md"
+
+          if [[ ! -f CHANGELOG.md ]]; then
+            echo "CHANGELOG.md is required and must follow Keep a Changelog format."
+            exit 1
+          fi
+
+          awk -v t="${tag}" -v tr="${tag_raw}" '
+            BEGIN { capture=0; found=0 }
+            $0 ~ "^## \\[" t "\\]" || $0 ~ "^## \\[" tr "\\]" {
+              capture=1
+              found=1
+              print
+              next
+            }
+            capture && /^## \[/ { exit }
+            capture { print }
+            END {
+              if (!found) exit 2
+            }
+          ' CHANGELOG.md > "${notes_file}" || {
+            echo "No Keep a Changelog entry found for tag ${tag_raw} (or ${tag})."
+            exit 1
+          }
+
+          if [[ ! -s "${notes_file}" ]]; then
+            echo "Extracted changelog section is empty for tag ${tag_raw}."
+            exit 1
+          fi
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release_notes.md

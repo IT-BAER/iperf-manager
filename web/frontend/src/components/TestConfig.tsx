@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useCallback, useRef } from 'react'
+﻿import { useState, useEffect, useCallback } from 'react'
 import type { Agent, TestConfig, TestState, ClientRow, Metrics } from '../types'
 import TopologyDiagram from './TopologyDiagram'
 
@@ -19,6 +19,50 @@ const DEFAULT_CONFIG: TestConfig = {
   tcp_window: '',
   mode: 'bidirectional',
   clients: [],
+}
+
+function clampNumber(value: unknown, fallback: number, min = Number.NEGATIVE_INFINITY): number {
+  const parsed = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.max(min, parsed)
+}
+
+function normalizeLoadedConfig(raw: unknown): TestConfig {
+  if (!raw || typeof raw !== 'object') return { ...DEFAULT_CONFIG }
+
+  const cfg = raw as Partial<TestConfig>
+  const clients = Array.isArray(cfg.clients)
+    ? cfg.clients
+      .filter(row => row && typeof row === 'object')
+      .map(row => {
+        const client = row as Partial<ClientRow>
+        return {
+          agent: String(client.agent || ''),
+          name: String(client.name || ''),
+          server_target: String(client.server_target || ''),
+          bind: String(client.bind || ''),
+          api_key: String(client.api_key || ''),
+        }
+      })
+    : []
+
+  return {
+    ...DEFAULT_CONFIG,
+    ...cfg,
+    server_agent: String(cfg.server_agent || ''),
+    server_bind: String(cfg.server_bind || ''),
+    api_key: String(cfg.api_key || ''),
+    duration_sec: Math.floor(clampNumber(cfg.duration_sec, DEFAULT_CONFIG.duration_sec, 1)),
+    base_port: Math.floor(clampNumber(cfg.base_port, DEFAULT_CONFIG.base_port, 1)),
+    poll_interval_sec: clampNumber(cfg.poll_interval_sec, DEFAULT_CONFIG.poll_interval_sec, 0.1),
+    protocol: cfg.protocol === 'udp' ? 'udp' : 'tcp',
+    parallel: Math.floor(clampNumber(cfg.parallel, DEFAULT_CONFIG.parallel, 1)),
+    omit_sec: Math.floor(clampNumber(cfg.omit_sec, DEFAULT_CONFIG.omit_sec, 0)),
+    bitrate: String(cfg.bitrate || ''),
+    tcp_window: String(cfg.tcp_window || ''),
+    mode: typeof cfg.mode === 'string' && cfg.mode ? cfg.mode : DEFAULT_CONFIG.mode,
+    clients,
+  }
 }
 
 interface TestConfigProps {
@@ -46,15 +90,17 @@ export default function TestConfigPanel({
     && config.clients[0]?.agent !== config.server_agent
 
   // Keep parent in sync
-  const onConfigChangeRef = useRef(onConfigChange)
-  onConfigChangeRef.current = onConfigChange
-  useEffect(() => { onConfigChangeRef.current?.(config) }, [config])
+  useEffect(() => {
+    onConfigChange?.(config)
+  }, [config, onConfigChange])
 
   // Receive loaded profiles
   useEffect(() => {
     const handler = (e: Event) => {
       const ce = e as CustomEvent<TestConfig>
-      if (ce.detail && typeof ce.detail === 'object') setConfig(ce.detail)
+      if (ce.detail && typeof ce.detail === 'object') {
+        setConfig(normalizeLoadedConfig(ce.detail))
+      }
     }
     window.addEventListener('load-profile', handler)
     return () => window.removeEventListener('load-profile', handler)

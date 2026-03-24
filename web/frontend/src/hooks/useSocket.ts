@@ -11,8 +11,10 @@ export function useSocket(enabled = true) {
     if (!enabled) {
       ref.current?.disconnect()
       ref.current = null
-      setSocket(null)
-      setConnected(false)
+      queueMicrotask(() => {
+        setSocket(null)
+        setConnected(false)
+      })
       return
     }
 
@@ -22,7 +24,7 @@ export function useSocket(enabled = true) {
       withCredentials: true,
     })
     ref.current = s
-    setSocket(s)
+    queueMicrotask(() => setSocket(s))
     s.on('connect', () => setConnected(true))
     s.on('disconnect', () => setConnected(false))
     s.on('connect_error', error => {
@@ -34,7 +36,10 @@ export function useSocket(enabled = true) {
     return () => {
       s.disconnect()
       if (ref.current === s) ref.current = null
-      setSocket(current => current === s ? null : current)
+      queueMicrotask(() => {
+        if (ref.current !== s) setConnected(false)
+        setSocket(current => current === s ? null : current)
+      })
     }
   }, [enabled])
 

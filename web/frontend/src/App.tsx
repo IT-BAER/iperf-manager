@@ -2,7 +2,7 @@
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import { useSocket } from './hooks/useSocket'
 import { api } from './api'
-import type { Agent, AuthSession, TestState, TestConfig, Metrics, LogEntry } from './types'
+import type { Agent, AuthSession, TestState, TestConfig, Metrics, LogEntry, Profile } from './types'
 
 import { AuthPanel } from './components/AuthPanel'
 import { Header } from './components/Header'
@@ -65,7 +65,11 @@ function ReportList({ onSelect }: { onSelect: (name: string) => void }) {
     e.stopPropagation()
     setSelected(prev => {
       const next = new Set(prev)
-      next.has(name) ? next.delete(name) : next.add(name)
+      if (next.has(name)) {
+        next.delete(name)
+      } else {
+        next.add(name)
+      }
       return next
     })
   }
@@ -219,6 +223,9 @@ export function App() {
   const [selectedReport, setSelectedReport] = useState<string | null>(null)
   const [isDiscovering, setIsDiscovering] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [profiles, setProfiles] = useState<Profile[]>([])
+  const [activeProfile, setActiveProfile] = useState('')
+  const [draftConfig, setDraftConfig] = useState<TestConfig | null>(null)
 
   const authEnabled = auth?.enabled ?? false
   const isAuthenticated = auth ? (!auth.enabled || auth.authenticated) : false
@@ -237,6 +244,9 @@ export function App() {
     setMetricsHistory([])
     setLogs([])
     setSelectedReport(null)
+    setProfiles([])
+    setActiveProfile('')
+    setDraftConfig(null)
   }, [])
 
   const loadAuth = useCallback(async () => {
@@ -400,6 +410,81 @@ export function App() {
     }
   }, [agents.length, toast])
 
+  // ── Profiles ─────────────────────────────────────────────────-
+  const loadProfiles = useCallback(async () => {
+    const data = await api<Profile[]>('/api/profiles')
+    if (!data) return
+
+    setProfiles(data)
+    setActiveProfile(prev => {
+      if (!prev) return prev
+      return data.some(profile => profile.name === prev) ? prev : ''
+    })
+  }, [])
+
+  const loadSelectedProfile = useCallback(async () => {
+    if (!activeProfile) {
+      toast('Select a profile first', 'info')
+      return
+    }
+
+    const data = await api<{ name: string; config: TestConfig }>(`/api/profiles/${encodeURIComponent(activeProfile)}`)
+    if (!data?.config) return
+
+    const profileName = (data.name || activeProfile).trim() || activeProfile
+    window.dispatchEvent(new CustomEvent('load-profile', { detail: data.config }))
+    setActiveTab('test')
+    setActiveProfile(profileName)
+    toast(`Loaded profile "${profileName}"`, 'ok')
+  }, [activeProfile, toast])
+
+  const saveProfile = useCallback(async () => {
+    if (!draftConfig) {
+      toast('Configure server and clients before saving a profile', 'info')
+      return
+    }
+
+    const suggestedName = activeProfile || 'profile'
+    const entered = window.prompt('Save profile as:', suggestedName)
+    if (entered === null) return
+
+    const name = entered.trim()
+    if (!name) {
+      toast('Profile name is required', 'err')
+      return
+    }
+
+    const data = await api<{ ok: boolean; name: string }>('/api/profiles', {
+      method: 'POST',
+      body: JSON.stringify({ name, config: draftConfig }),
+    })
+    if (!data) return
+
+    const savedName = data.name || name
+    await loadProfiles()
+    setActiveProfile(savedName)
+    toast(`Saved profile "${savedName}"`, 'ok')
+  }, [activeProfile, draftConfig, loadProfiles, toast])
+
+  const deleteSelectedProfile = useCallback(async () => {
+    if (!activeProfile) {
+      toast('Select a profile first', 'info')
+      return
+    }
+
+    if (!window.confirm(`Delete profile "${activeProfile}"?`)) return
+
+    const deletedName = activeProfile
+    const data = await api<{ ok: boolean }>(`/api/profiles/${encodeURIComponent(activeProfile)}`, {
+      method: 'DELETE',
+    })
+    if (!data) return
+
+    setActiveProfile('')
+    setProfiles(prev => prev.filter(profile => profile.name !== deletedName))
+    toast(`Deleted profile "${deletedName}"`, 'ok')
+  }, [activeProfile, toast])
+
   // ── Test control ──────────────────────────────────────────────
   const startTest = useCallback(async (config: TestConfig) => {
     setLatestMetrics(null)
@@ -429,6 +514,15 @@ export function App() {
     })()
   }, [auth, discoverAgents, isAuthenticated, refreshAgents])
 
+  useEffect(() => {
+    if (!auth || !isAuthenticated) {
+      setProfiles([])
+      setActiveProfile('')
+      return
+    }
+    void loadProfiles()
+  }, [auth, isAuthenticated, loadProfiles])
+
   if (!auth) {
     return (
       <div className="min-h-screen bg-bg text-fg flex items-center justify-center">
@@ -455,6 +549,12 @@ export function App() {
         onToggleSidebar={() => setSidebarOpen(prev => !prev)}
         activeTab={activeTab}
         onTabChange={setActiveTab}
+        profiles={profiles}
+        activeProfile={activeProfile}
+        onProfileChange={setActiveProfile}
+        onProfileLoad={loadSelectedProfile}
+        onProfileSave={saveProfile}
+        onProfileDelete={deleteSelectedProfile}
         authUser={auth.username}
         onLogout={authEnabled ? logout : undefined}
       />
@@ -483,6 +583,7 @@ export function App() {
                 latestMetrics={latestMetrics}
                 onStart={startTest}
                 onStop={stopTest}
+                onConfigChange={setDraftConfig}
               />
               <LiveResults
                 testState={testState}
@@ -495,7 +596,7 @@ export function App() {
 
           {activeTab === 'reports' && (
             selectedReport
-              ? <ReportViewer filename={selectedReport} onBack={() => setSelectedReport(null)} />
+              ? <ReportViewer key={selectedReport} filename={selectedReport} onBack={() => setSelectedReport(null)} />
               : <ReportList onSelect={setSelectedReport} />
           )}
         </main>

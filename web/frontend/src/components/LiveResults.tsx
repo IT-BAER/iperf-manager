@@ -115,7 +115,7 @@ function buildBarOptions(): ChartOptions<'bar'> {
 
 export default function LiveResults({ testState, metrics, metricsHistory }: LiveResultsProps) {
   const [open, setOpen] = useState(true)
-  const [nowMs, setNowMs] = useState(Date.now())
+  const [nowMs, setNowMs] = useState(0)
   const isRunning = testState.status === 'running'
   const mode = String(testState.config?.mode || '').toLowerCase()
   const isBidirectional = mode === 'bidirectional'
