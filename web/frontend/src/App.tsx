@@ -262,11 +262,13 @@ export function App() {
       on('test_started', (data: unknown) => {
         const d = data as { config?: TestConfig; ts: number }
         setTestState({ status: 'running', started_at: d.ts, config: d.config })
+        setLatestMetrics(null)
         setMetricsHistory([])
         setLogs([])
       }),
-      on('test_completed', () => {
-        setTestState(prev => ({ ...prev, status: 'idle', finished_at: Date.now() / 1000 }))
+      on('test_completed', (data: unknown) => {
+        const d = data as { ts?: number }
+        setTestState(prev => ({ ...prev, status: 'idle', finished_at: d?.ts ?? Date.now() / 1000 }))
       }),
       on('test_error', (data: unknown) => {
         const d = data as { message: string; ts: number }
@@ -400,6 +402,9 @@ export function App() {
 
   // ── Test control ──────────────────────────────────────────────
   const startTest = useCallback(async (config: TestConfig) => {
+    setLatestMetrics(null)
+    setMetricsHistory([])
+    setLogs([])
     await api('/api/test/start', { method: 'POST', body: JSON.stringify(config) })
   }, [])
 

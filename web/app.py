@@ -9,6 +9,7 @@ import csv
 import hashlib
 import hmac
 import io
+import ipaddress
 import json
 import os
 import socket
@@ -378,33 +379,114 @@ def _refresh_agent(aid: str, info: dict) -> dict:
 
 
 def _discover_agents(timeout: float = 3.0) -> list[dict]:
-    """Send UDP broadcast and collect agent responses."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    sock.settimeout(timeout)
-    found: list[dict] = []
+    """Discover agents via unicast targets, with optional UDP broadcast."""
+    found_by_url: dict[str, dict] = {}
+
+    def _record_packet(data: bytes, addr: tuple[str, int]) -> None:
+        try:
+            info = json.loads(data.decode())
+        except Exception:
+            return
+
+        url = info.get("base", f"http://{addr[0]}:{DEFAULT_API_PORT}")
+        if not isinstance(url, str) or not url:
+            return
+
+        found_by_url[url] = {
+            "url": url,
+            "name": info.get("name", addr[0]),
+            "version": info.get("version", ""),
+            "ips": info.get("ips", [addr[0]]),
+            "interfaces": info.get("interfaces", []),
+            "servers": info.get("servers", []),
+        }
+
+    def _probe(targets: list[tuple[str, int]], recv_timeout: float) -> None:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        try:
+            for host, port in targets:
+                try:
+                    sock.sendto(b"IPERF3_DISCOVER", (host, port))
+                except OSError:
+                    continue
+
+            deadline = time.time() + max(0.1, recv_timeout)
+            while time.time() < deadline:
+                sock.settimeout(max(0.05, deadline - time.time()))
+                try:
+                    data, addr = sock.recvfrom(4096)
+                except socket.timeout:
+                    break
+                _record_packet(data, addr)
+        finally:
+            sock.close()
+
+    local_ip = ""
+    probe_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        sock.sendto(b"IPERF3_DISCOVER", ("<broadcast>", DISCOVER_PORT))
-        while True:
-            try:
-                data, addr = sock.recvfrom(4096)
-                info = json.loads(data.decode())
-                url = info.get("base", f"http://{addr[0]}:{DEFAULT_API_PORT}")
-                found.append({
-                    "url": url,
-                    "name": info.get("name", addr[0]),
-                    "version": info.get("version", ""),
-                    "ips": info.get("ips", [addr[0]]),
-                    "interfaces": info.get("interfaces", []),
-                    "servers": info.get("servers", []),
-                })
-            except socket.timeout:
-                break
-    except Exception:
+        probe_sock.connect(("10.255.255.255", 1))
+        local_ip = probe_sock.getsockname()[0]
+    except OSError:
         pass
     finally:
-        sock.close()
-    return found
+        probe_sock.close()
+
+    targets: list[str] = []
+    seen: set[str] = set()
+
+    def _add_target(host: str) -> None:
+        try:
+            ipaddress.ip_address(host)
+        except ValueError:
+            return
+        if host == local_ip or host in seen:
+            return
+        seen.add(host)
+        targets.append(host)
+
+    cidr_list = os.environ.get("DASHBOARD_DISCOVERY_CIDRS", "").strip()
+    if cidr_list:
+        for token in cidr_list.split(","):
+            candidate = token.strip()
+            if not candidate:
+                continue
+            if "/" in candidate:
+                try:
+                    net = ipaddress.ip_network(candidate, strict=False)
+                except ValueError:
+                    continue
+                if net.num_addresses > 1024:
+                    continue
+                for ip in net.hosts():
+                    _add_target(str(ip))
+            else:
+                _add_target(candidate)
+
+    broadcast_mode = os.environ.get("DASHBOARD_DISCOVERY_BROADCAST", "auto").strip().lower()
+    if broadcast_mode in {"1", "true", "yes", "on"}:
+        use_broadcast = True
+    elif broadcast_mode in {"0", "false", "no", "off"}:
+        use_broadcast = False
+    else:
+        # Auto mode: avoid noisy global broadcasts when explicit targets are configured.
+        use_broadcast = not bool(targets)
+
+    if use_broadcast:
+        _probe([("<broadcast>", DISCOVER_PORT), ("255.255.255.255", DISCOVER_PORT)], timeout)
+
+    if not found_by_url and not targets and local_ip:
+        try:
+            local_net = ipaddress.ip_network(f"{local_ip}/24", strict=False)
+            for ip in local_net.hosts():
+                _add_target(str(ip))
+        except ValueError:
+            pass
+
+    if targets:
+        _probe([(host, DISCOVER_PORT) for host in targets], min(timeout, 2.0))
+
+    return list(found_by_url.values())
 
 
 # ╔══════════════════════════════════════════════════════════════════════╗
@@ -448,12 +530,14 @@ def _normalize_config(raw: dict) -> dict:
 
     mode = _MODE_MAP.get(raw.get("mode", ""), raw.get("mode", ""))
 
+    server_bind = str(raw.get("server_bind", "") or "").strip()
+
     clients = []
     for c in raw.get("clients", []):
         agent_id = c.get("agent", "")
         agent_info = agent_snapshot.get(agent_id, {})
         agent_api_key = str(agent_info.get("api_key", "") or "")
-        target = c.get("server_target") or c.get("target", "") or server_ip
+        target = c.get("server_target") or c.get("target", "") or server_bind or server_ip
         client_entry: dict = {
             "agent": _resolve_agent_url(agent_id) if agent_id else "",
             "name": c.get("name") or agent_id,
@@ -468,7 +552,7 @@ def _normalize_config(raw: dict) -> dict:
         "server": {
             "agent": server_url,
             "name": server_name,
-            "bind": raw.get("server_bind", ""),
+            "bind": server_bind,
             "api_key": raw.get("api_key", "") or server_api_key,
         },
         "clients": clients,
