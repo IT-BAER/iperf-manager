@@ -11,6 +11,9 @@ and this project adheres to Semantic Versioning.
 - Profile selection in the React dashboard now loads the selected profile immediately, removing the extra manual load click.
 - Added stale-request protection for profile loading so rapid selection changes do not apply older responses over newer choices.
 - Documented explicit main-branch install one-liners (`--ref main`) for deployments that should track `main` instead of the latest release tag.
+- Modernized all dashboard dropdown controls with a consistent themed select style and updated icon treatment to match the Web UI visual language.
+- Restricted the `Quality And Release` GitHub Actions workflow to trigger only on version tag pushes (`v*`).
+- Corrected README test base-port defaults and examples to match the current dashboard default (`5201`).
 
 ## [1.0.0] - 2026-03-24
 
