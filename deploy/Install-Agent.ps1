@@ -44,7 +44,11 @@ $TaskDescription = "iperf-manager Agent (headless) - network performance testing
 $ConfigDir      = Join-Path $InstallDir "config\iperf3-agent"
 $LogDir         = Join-Path $InstallDir "logs"
 $RepoUrl        = "https://github.com/IT-BAER/iperf-manager.git"
-$RepoZipUrl     = "https://github.com/IT-BAER/iperf-manager/archive/refs/heads/main.zip"
+$RepoReleaseApi = "https://api.github.com/repos/IT-BAER/iperf-manager/releases/latest"
+$RepoRef        = $env:IPERF_MANAGER_REF
+$RepoZipTagUrl  = $null
+$RepoZipHeadUrl = $null
+$RepoZipMainUrl = "https://github.com/IT-BAER/iperf-manager/archive/refs/heads/main.zip"
 $Iperf3Dir      = Join-Path $InstallDir "iperf3"
 $FwRulePrefix   = "iperf-manager"
 $Iperf3Release  = "https://api.github.com/repos/ar51an/iperf3-win-builds/releases/tags/3.13"
@@ -114,6 +118,19 @@ function Resolve-Python {
     }
 
     return $null
+}
+
+function Resolve-LatestRepoRef {
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $releaseInfo = Invoke-RestMethod -Uri $RepoReleaseApi -UseBasicParsing
+        $tagName = [string]$releaseInfo.tag_name
+        if (-not [string]::IsNullOrWhiteSpace($tagName)) {
+            return $tagName.Trim()
+        }
+    } catch {
+    }
+    return ""
 }
 
 function Install-Python {
@@ -286,6 +303,19 @@ if (-not $Token) {
     Write-Ok "Generated API token automatically"
 }
 
+if ([string]::IsNullOrWhiteSpace($RepoRef)) {
+    $RepoRef = Resolve-LatestRepoRef
+    if ([string]::IsNullOrWhiteSpace($RepoRef)) {
+        $RepoRef = "main"
+        Write-Warn "Could not resolve latest release tag. Falling back to $RepoRef"
+    } else {
+        Write-Ok "Using latest release ref: $RepoRef"
+    }
+}
+
+$RepoZipTagUrl = "https://github.com/IT-BAER/iperf-manager/archive/refs/tags/$RepoRef.zip"
+$RepoZipHeadUrl = "https://github.com/IT-BAER/iperf-manager/archive/refs/heads/$RepoRef.zip"
+
 # ── 2. Install iperf3 ───────────────────────────────────────────────
 Write-Step "Checking iperf3 ..."
 $iperf3Exe = Join-Path $Iperf3Dir "iperf3.exe"
@@ -390,11 +420,26 @@ if (-not $gitCmd) {
 $canUseGit = $null -ne $gitCmd
 
 if ($canUseGit -and (Test-Path $gitDir)) {
-    Write-Step "Repository exists - pulling latest changes ..."
-    & git -C $InstallDir fetch --quiet origin 2>$null
-    $resetResult = & git -C $InstallDir reset --hard origin/main --quiet 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        & git -C $InstallDir reset --hard origin/master --quiet 2>$null
+    Write-Step "Repository exists - syncing ref $RepoRef ..."
+    & git -C $InstallDir fetch --quiet origin --tags 2>$null
+
+    & git -C $InstallDir show-ref --verify --quiet "refs/remotes/origin/$RepoRef"
+    if ($LASTEXITCODE -eq 0) {
+        & git -C $InstallDir checkout --quiet $RepoRef 2>$null
+        & git -C $InstallDir reset --hard "origin/$RepoRef" --quiet 2>$null
+    } else {
+        & git -C $InstallDir checkout --quiet $RepoRef 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            & git -C $InstallDir checkout --quiet "tags/$RepoRef" 2>$null
+        }
+        if ($LASTEXITCODE -ne 0) {
+            throw "Unable to checkout ref $RepoRef"
+        }
+
+        & git -C $InstallDir reset --hard $RepoRef --quiet 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            & git -C $InstallDir reset --hard "tags/$RepoRef" --quiet 2>$null
+        }
     }
     Write-Ok "Repository updated"
 } elseif ($canUseGit) {
@@ -409,7 +454,21 @@ if ($canUseGit -and (Test-Path $gitDir)) {
     }
 
     if (Test-Path $InstallDir) { Remove-Item -Path $InstallDir -Recurse -Force }
-    & git clone --quiet $RepoUrl $InstallDir 2>$null
+    & git clone --quiet --branch $RepoRef $RepoUrl $InstallDir 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        if (Test-Path $InstallDir) { Remove-Item -Path $InstallDir -Recurse -Force }
+        & git clone --quiet $RepoUrl $InstallDir 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to clone repository"
+        }
+        & git -C $InstallDir checkout --quiet $RepoRef 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            & git -C $InstallDir checkout --quiet "tags/$RepoRef" 2>$null
+        }
+        if ($LASTEXITCODE -ne 0) {
+            throw "Unable to checkout ref $RepoRef"
+        }
+    }
     Write-Ok "Repository cloned to $InstallDir"
 
     # Restore preserved directories
@@ -430,13 +489,25 @@ if ($canUseGit -and (Test-Path $gitDir)) {
         $tempBackups[$dir] = $backupPath
     }
 
-    $zipPath = Join-Path $env:TEMP "iperf-manager-main.zip"
-    $extractPath = Join-Path $env:TEMP "iperf-manager-main-extract"
+    $zipPath = Join-Path $env:TEMP ("iperf-manager-{0}.zip" -f $RepoRef)
+    $extractPath = Join-Path $env:TEMP ("iperf-manager-{0}-extract" -f $RepoRef)
     if (Test-Path $zipPath) { Remove-Item -Path $zipPath -Force }
     if (Test-Path $extractPath) { Remove-Item -Path $extractPath -Recurse -Force }
 
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    Invoke-WebRequest -Uri $RepoZipUrl -OutFile $zipPath -UseBasicParsing
+    $zipDownloaded = $false
+    foreach ($candidate in @($RepoZipTagUrl, $RepoZipHeadUrl, $RepoZipMainUrl)) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+        try {
+            Invoke-WebRequest -Uri $candidate -OutFile $zipPath -UseBasicParsing
+            $zipDownloaded = $true
+            break
+        } catch {
+        }
+    }
+    if (-not $zipDownloaded) {
+        throw "Failed to download repository archive for ref $RepoRef"
+    }
     Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
 
     $sourceDir = Get-ChildItem -Path $extractPath -Directory | Select-Object -First 1

@@ -4,7 +4,7 @@ set -euo pipefail
 
 INSTALL_DIR='/opt/iperf-manager'
 REPO_URL='https://github.com/IT-BAER/iperf-manager.git'
-BRANCH='main'
+BRANCH=''
 SERVICE_NAME='iperf-web'
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 SERVICE_PORT=${IPERF_MANAGER_WEB_PORT:-}
@@ -39,7 +39,8 @@ Actions:
 Options:
   --purge                   With --uninstall, also remove install directory
   --repo-url <url>          Repository URL (default: ${REPO_URL})
-  --branch <name>           Repository branch (default: ${BRANCH})
+	--ref <name>              Repository ref (tag or branch)
+	--branch <name>           Alias for --ref
   --install-dir <path>      Install directory (default: ${INSTALL_DIR})
   --port <port>             Web service port (default: 5000)
   --skip-repo-sync          Use existing local tree without git fetch/reset
@@ -75,6 +76,10 @@ while [[ $# -gt 0 ]]; do
 			;;
 		--repo-url)
 			REPO_URL="$2"
+			shift 2
+			;;
+		--ref)
+			BRANCH="$2"
 			shift 2
 			;;
 		--branch)
@@ -114,6 +119,18 @@ ok()    { echo -e "${GREEN}[ OK ]${NC}  $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 err()   { echo -e "${RED}[ERR ]${NC}  $*" >&2; }
 die()   { err "$@"; exit 1; }
+
+resolve_latest_release_ref() {
+	local latest=''
+	if ! command -v curl >/dev/null 2>&1; then
+		return 1
+	fi
+	latest="$(curl -fsSL 'https://api.github.com/repos/IT-BAER/iperf-manager/releases/latest' \
+		| sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+		| head -n 1 || true)"
+	[[ -n "$latest" ]] || return 1
+	printf '%s' "$latest"
+}
 
 detect_service_port() {
 	[[ -f "$SERVICE_FILE" ]] || return 0
@@ -159,6 +176,15 @@ fi
 
 SERVICE_PORT=${SERVICE_PORT:-5000}
 
+if [[ -z "$BRANCH" ]]; then
+	if BRANCH="$(resolve_latest_release_ref)"; then
+		ok "Using latest release ref: ${BRANCH}"
+	else
+		BRANCH='main'
+		warn "Could not resolve latest release tag. Falling back to ${BRANCH}."
+	fi
+fi
+
 info 'Installing system dependencies (git, python, node/npm if needed) ...'
 apt-get update -qq
 apt-get install -y -qq git curl ca-certificates python3 python3-venv python3-pip
@@ -173,14 +199,27 @@ if $SKIP_REPO_SYNC_FLAG; then
 	[[ -f "${INSTALL_DIR}/main_web.py" ]] || die "IPERF_MANAGER_SKIP_REPO_SYNC=1 requires an existing repo checkout in ${INSTALL_DIR}"
 	ok "Using existing repository tree in ${INSTALL_DIR} without git sync"
 elif [[ -d "${INSTALL_DIR}/.git" ]]; then
-	info 'Repository exists - pulling latest changes ...'
-	git -C "$INSTALL_DIR" fetch --quiet origin
-	git -C "$INSTALL_DIR" reset --hard "origin/${BRANCH}" --quiet 2>/dev/null \
-		|| git -C "$INSTALL_DIR" reset --hard origin/master --quiet
+	info "Repository exists - syncing ref ${BRANCH} ..."
+	git -C "$INSTALL_DIR" fetch --quiet --tags origin
+	if git -C "$INSTALL_DIR" ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+		git -C "$INSTALL_DIR" checkout --quiet "$BRANCH" >/dev/null 2>&1 || true
+		git -C "$INSTALL_DIR" reset --hard "origin/${BRANCH}" --quiet
+	else
+		git -C "$INSTALL_DIR" checkout --quiet "$BRANCH" >/dev/null 2>&1 \
+			|| git -C "$INSTALL_DIR" checkout --quiet "tags/${BRANCH}" >/dev/null 2>&1 \
+			|| die "Unable to checkout ref ${BRANCH}"
+		git -C "$INSTALL_DIR" reset --hard "$BRANCH" --quiet >/dev/null 2>&1 \
+			|| git -C "$INSTALL_DIR" reset --hard "tags/${BRANCH}" --quiet
+	fi
 	ok 'Repository updated'
 else
 	rm -rf "$INSTALL_DIR"
-	git clone --quiet "$REPO_URL" "$INSTALL_DIR"
+	if ! git clone --quiet --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR" >/dev/null 2>&1; then
+		git clone --quiet "$REPO_URL" "$INSTALL_DIR"
+		git -C "$INSTALL_DIR" checkout --quiet "$BRANCH" >/dev/null 2>&1 \
+			|| git -C "$INSTALL_DIR" checkout --quiet "tags/${BRANCH}" >/dev/null 2>&1 \
+			|| die "Unable to checkout ref ${BRANCH}"
+	fi
 	ok "Repository cloned to ${INSTALL_DIR}"
 fi
 

@@ -16,6 +16,7 @@ LOG_DIR="/var/log/iperf-manager"
 SERVICE_NAME="iperf-agent"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 REPO_URL="https://github.com/IT-BAER/iperf-manager.git"
+REPO_REF="${IPERF_MANAGER_REF:-}"
 UNINSTALL=false
 PURGE_INSTALL_DIR=false
 TOKEN_GENERATED=false
@@ -38,6 +39,18 @@ warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 err()   { echo -e "${RED}[ERR ]${NC}  $*" >&2; }
 die()   { err "$@"; exit 1; }
 
+resolve_latest_release_ref() {
+    local latest=''
+    if ! command -v curl >/dev/null 2>&1; then
+        return 1
+    fi
+    latest="$(curl -fsSL 'https://api.github.com/repos/IT-BAER/iperf-manager/releases/latest' \
+        | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+        | head -n 1 || true)"
+    [[ -n "$latest" ]] || return 1
+    printf '%s' "$latest"
+}
+
 # ── Argument Parsing ─────────────────────────────────────────────────
 usage() {
     cat <<EOF
@@ -47,6 +60,7 @@ Options:
   --token <api_key>          API key for agent authentication
   --port <port>              REST API port (default: 9001)
   --iperf-ports <p1,p2,...>  iperf3 autostart ports (default: 5211,5212)
+    --ref <name>               Repository ref (tag or branch)
     --uninstall                Remove service, config, log dir, and firewall rules
     --purge                    With --uninstall, also remove ${INSTALL_DIR}
   -h, --help                 Show this help
@@ -68,6 +82,7 @@ while [[ $# -gt 0 ]]; do
         --uninstall)   UNINSTALL=true;   shift   ;;
         --purge)       PURGE_INSTALL_DIR=true; shift ;;
         -h|--help)     usage ;;
+        --ref)         REPO_REF="$2";    shift 2 ;;
         *) die "Unknown option: $1  (use --help)" ;;
     esac
 done
@@ -181,16 +196,33 @@ if [[ -z "$API_TOKEN" ]]; then
     ok "Generated API token automatically"
 fi
 
+if [[ -z "$REPO_REF" ]]; then
+    if REPO_REF="$(resolve_latest_release_ref)"; then
+        ok "Using latest release ref: ${REPO_REF}"
+    else
+        REPO_REF='main'
+        warn "Could not resolve latest release tag. Falling back to ${REPO_REF}."
+    fi
+fi
+
 # ── 3. Clone or update repository ───────────────────────────────────
 info "Setting up repository in ${INSTALL_DIR} …"
 if $SKIP_REPO_SYNC_FLAG; then
     [[ -f "${INSTALL_DIR}/main_agent.py" ]] || die "IPERF_MANAGER_SKIP_REPO_SYNC=1 requires an existing repo checkout in ${INSTALL_DIR}"
     ok "Using existing repository tree in ${INSTALL_DIR} without git sync"
 elif [[ -d "${INSTALL_DIR}/.git" ]]; then
-    info "Repository exists – pulling latest changes …"
-    git -C "$INSTALL_DIR" fetch --quiet origin
-    git -C "$INSTALL_DIR" reset --hard origin/main --quiet 2>/dev/null \
-        || git -C "$INSTALL_DIR" reset --hard origin/master --quiet
+    info "Repository exists - syncing ref ${REPO_REF} …"
+    git -C "$INSTALL_DIR" fetch --quiet --tags origin
+    if git -C "$INSTALL_DIR" ls-remote --exit-code --heads origin "$REPO_REF" >/dev/null 2>&1; then
+        git -C "$INSTALL_DIR" checkout --quiet "$REPO_REF" >/dev/null 2>&1 || true
+        git -C "$INSTALL_DIR" reset --hard "origin/${REPO_REF}" --quiet
+    else
+        git -C "$INSTALL_DIR" checkout --quiet "$REPO_REF" >/dev/null 2>&1 \
+            || git -C "$INSTALL_DIR" checkout --quiet "tags/${REPO_REF}" >/dev/null 2>&1 \
+            || die "Unable to checkout ref ${REPO_REF}"
+        git -C "$INSTALL_DIR" reset --hard "$REPO_REF" --quiet >/dev/null 2>&1 \
+            || git -C "$INSTALL_DIR" reset --hard "tags/${REPO_REF}" --quiet
+    fi
     ok "Repository updated"
 else
     # Install git if missing
@@ -199,7 +231,12 @@ else
         apt-get install -y -qq git
     fi
     rm -rf "$INSTALL_DIR"
-    git clone --quiet "$REPO_URL" "$INSTALL_DIR"
+    if ! git clone --quiet --branch "$REPO_REF" "$REPO_URL" "$INSTALL_DIR" >/dev/null 2>&1; then
+        git clone --quiet "$REPO_URL" "$INSTALL_DIR"
+        git -C "$INSTALL_DIR" checkout --quiet "$REPO_REF" >/dev/null 2>&1 \
+            || git -C "$INSTALL_DIR" checkout --quiet "tags/${REPO_REF}" >/dev/null 2>&1 \
+            || die "Unable to checkout ref ${REPO_REF}"
+    fi
     ok "Repository cloned to ${INSTALL_DIR}"
 fi
 

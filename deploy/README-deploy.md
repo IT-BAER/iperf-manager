@@ -9,18 +9,26 @@ This repository ships three deployment helpers:
 
 ## One-Line Lifecycle Commands
 
+Resolve the latest release ref once per shell before running the Linux commands below:
+
+```bash
+REPO="IT-BAER/iperf-manager"
+REF="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+REF="${REF:-main}"
+```
+
 ### Linux web dashboard (Debian, Ubuntu, Proxmox)
 
 Install:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-web-linux.sh | sudo bash
+curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/deploy/install-web-linux.sh" | sudo bash
 ```
 
 Install with parameters (port + dashboard credentials):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-web-linux.sh \
+curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/deploy/install-web-linux.sh" \
   | sudo DASHBOARD_AUTH_USERNAME=admin DASHBOARD_AUTH_PASSWORD='change-me' \
     bash -s -- --port 5000
 ```
@@ -28,21 +36,21 @@ curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/i
 Update (idempotent):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-web-linux.sh \
+curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/deploy/install-web-linux.sh" \
   | sudo bash -s -- --update
 ```
 
 Uninstall service only:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-web-linux.sh \
+curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/deploy/install-web-linux.sh" \
   | sudo bash -s -- --uninstall
 ```
 
 Uninstall and purge `/opt/iperf-manager`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-web-linux.sh \
+curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/deploy/install-web-linux.sh" \
   | sudo bash -s -- --uninstall --purge
 ```
 
@@ -53,27 +61,27 @@ curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/i
 Install:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-agent-linux.sh | sudo bash
+curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/deploy/install-agent-linux.sh" | sudo bash
 ```
 
 Install or update with parameters:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-agent-linux.sh \
+curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/deploy/install-agent-linux.sh" \
   | sudo bash -s -- --token "mySecretKey" --port 9001 --iperf-ports "5211,5212"
 ```
 
 Uninstall:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-agent-linux.sh \
+curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/deploy/install-agent-linux.sh" \
   | sudo bash -s -- --uninstall
 ```
 
 Uninstall and purge `/opt/iperf-manager`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-agent-linux.sh \
+curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/deploy/install-agent-linux.sh" \
   | sudo bash -s -- --uninstall --purge
 ```
 
@@ -91,7 +99,7 @@ That mode keeps the staged local tree instead of resetting the host back to GitH
 Install:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/Install-Agent.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$repo='IT-BAER/iperf-manager'; $ref=(Invoke-RestMethod -UseBasicParsing https://api.github.com/repos/$repo/releases/latest).tag_name; if([string]::IsNullOrWhiteSpace($ref)){$ref='main'}; iwr -UseBasicParsing https://raw.githubusercontent.com/$repo/$ref/deploy/Install-Agent.ps1 | iex"
 ```
 
 If Python or Git is missing, the installer now attempts a silent bootstrap of both dependencies before continuing.
@@ -99,13 +107,13 @@ If Python or Git is missing, the installer now attempts a silent bootstrap of bo
 Install or update with parameters:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/Install-Agent.ps1 -OutFile $env:TEMP\Install-Agent.ps1; & $env:TEMP\Install-Agent.ps1 -Token 'mySecretKey' -Port 9001 -IperfPorts '5211,5212'"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$repo='IT-BAER/iperf-manager'; $ref=(Invoke-RestMethod -UseBasicParsing https://api.github.com/repos/$repo/releases/latest).tag_name; if([string]::IsNullOrWhiteSpace($ref)){$ref='main'}; iwr -UseBasicParsing https://raw.githubusercontent.com/$repo/$ref/deploy/Install-Agent.ps1 -OutFile $env:TEMP\Install-Agent.ps1; & $env:TEMP\Install-Agent.ps1 -Token 'mySecretKey' -Port 9001 -IperfPorts '5211,5212'"
 ```
 
 Uninstall:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/Install-Agent.ps1 -OutFile $env:TEMP\Install-Agent.ps1; & $env:TEMP\Install-Agent.ps1 -Uninstall"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$repo='IT-BAER/iperf-manager'; $ref=(Invoke-RestMethod -UseBasicParsing https://api.github.com/repos/$repo/releases/latest).tag_name; if([string]::IsNullOrWhiteSpace($ref)){$ref='main'}; iwr -UseBasicParsing https://raw.githubusercontent.com/$repo/$ref/deploy/Install-Agent.ps1 -OutFile $env:TEMP\Install-Agent.ps1; & $env:TEMP\Install-Agent.ps1 -Uninstall"
 ```
 
 ## Security Notes
@@ -123,7 +131,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://raw.gi
 ```bash
 sudo apt update
 sudo apt install -y iperf3 git python3
-sudo git clone https://github.com/IT-BAER/iperf-manager.git /opt/iperf-manager
+REPO="https://github.com/IT-BAER/iperf-manager.git"
+REF="$(curl -fsSL "https://api.github.com/repos/IT-BAER/iperf-manager/releases/latest" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+REF="${REF:-main}"
+sudo git clone --branch "$REF" "$REPO" /opt/iperf-manager
 
 # optional smoke test before installing the service
 sudo LOCALAPPDATA=/etc/iperf-manager python3 /opt/iperf-manager/main_agent.py --host 0.0.0.0 --port 9001
@@ -135,7 +146,10 @@ sudo bash /opt/iperf-manager/deploy/install-agent-linux.sh
 ### Windows
 
 ```powershell
-git clone https://github.com/IT-BAER/iperf-manager.git C:\iperf-manager
+$repo = 'https://github.com/IT-BAER/iperf-manager.git'
+$ref = (Invoke-RestMethod -UseBasicParsing https://api.github.com/repos/IT-BAER/iperf-manager/releases/latest).tag_name
+if ([string]::IsNullOrWhiteSpace($ref)) { $ref = 'main' }
+git clone --branch $ref $repo C:\iperf-manager
 
 # optional smoke test before registering the scheduled task
 cd C:\iperf-manager

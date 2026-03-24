@@ -61,25 +61,33 @@ Dashboard flow:
 
 ### Service Deployment (One-Liners)
 
+Resolve the latest release ref once per shell before running the Linux commands below:
+
+```bash
+REPO="IT-BAER/iperf-manager"
+REF="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+REF="${REF:-main}"
+```
+
 #### Linux web dashboard
 
 Install:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-web-linux.sh | sudo bash
+curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/deploy/install-web-linux.sh" | sudo bash
 ```
 
 Update:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-web-linux.sh \
+curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/deploy/install-web-linux.sh" \
   | sudo bash -s -- --update
 ```
 
 Uninstall:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-web-linux.sh \
+curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/deploy/install-web-linux.sh" \
   | sudo bash -s -- --uninstall
 ```
 
@@ -88,13 +96,13 @@ curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/i
 Install:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-agent-linux.sh | sudo bash
+curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/deploy/install-agent-linux.sh" | sudo bash
 ```
 
 Uninstall:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-agent-linux.sh \
+curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/deploy/install-agent-linux.sh" \
   | sudo bash -s -- --uninstall
 ```
 
@@ -105,18 +113,18 @@ Add `--purge` to also remove `/opt/iperf-manager`.
 Install:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/Install-Agent.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$repo='IT-BAER/iperf-manager'; $ref=(Invoke-RestMethod -UseBasicParsing https://api.github.com/repos/$repo/releases/latest).tag_name; if([string]::IsNullOrWhiteSpace($ref)){$ref='main'}; iwr -UseBasicParsing https://raw.githubusercontent.com/$repo/$ref/deploy/Install-Agent.ps1 | iex"
 ```
 
 Uninstall:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/Install-Agent.ps1 -OutFile $env:TEMP\Install-Agent.ps1; & $env:TEMP\Install-Agent.ps1 -Uninstall"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$repo='IT-BAER/iperf-manager'; $ref=(Invoke-RestMethod -UseBasicParsing https://api.github.com/repos/$repo/releases/latest).tag_name; if([string]::IsNullOrWhiteSpace($ref)){$ref='main'}; iwr -UseBasicParsing https://raw.githubusercontent.com/$repo/$ref/deploy/Install-Agent.ps1 -OutFile $env:TEMP\Install-Agent.ps1; & $env:TEMP\Install-Agent.ps1 -Uninstall"
 ```
 
 If Python or Git is missing, the Windows installer attempts to install them automatically.
 
-For parameterized install/update commands (token, ports, branch, repo URL, skip build/sync), see [deploy/README-deploy.md](deploy/README-deploy.md).
+For parameterized install/update commands (token, ports, ref, repo URL, skip build/sync), see [deploy/README-deploy.md](deploy/README-deploy.md).
 
 ### Required Network Ports (Firewall)
 
