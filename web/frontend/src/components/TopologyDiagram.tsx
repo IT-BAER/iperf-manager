@@ -227,7 +227,7 @@ export default function TopologyDiagram({
               <div>
                 <label className="text-[11px] text-fg-3 block mb-0.5">Bind Interface</label>
                 <select
-                  className="input-base text-[12px]"
+                  className="select-base text-[12px]"
                   value={config.server_bind}
                   onChange={e => onUpdate('server_bind', e.target.value)}
                   disabled={isRunning}
@@ -370,7 +370,7 @@ export default function TopologyDiagram({
                       <div>
                         <label className="text-[11px] text-fg-3 block mb-0.5">Bind Interface</label>
                         <select
-                          className="input-base text-[12px]"
+                          className="select-base text-[12px]"
                           value={row.bind}
                           onChange={e => onUpdateRow(i, 'bind', e.target.value)}
                           disabled={isRunning}
@@ -384,7 +384,7 @@ export default function TopologyDiagram({
                       <div>
                         <label className="text-[11px] text-fg-3 block mb-0.5">Server Target</label>
                         <select
-                          className="input-base text-[12px]"
+                          className="select-base text-[12px]"
                           value={row.server_target}
                           onChange={e => onUpdateRow(i, 'server_target', e.target.value)}
                           disabled={isRunning}

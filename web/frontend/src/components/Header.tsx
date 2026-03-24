@@ -114,7 +114,7 @@ export function Header({
         <select
           value={activeProfile}
           onChange={e => onProfileChange(e.target.value)}
-          className="h-7 min-w-[130px] max-w-[220px] bg-bg border border-line rounded-sm px-2 text-[12px] text-fg"
+          className="select-base h-7 min-w-[130px] max-w-[220px] text-[12px]"
           aria-label="Select profile"
           title="Select profile"
         >
