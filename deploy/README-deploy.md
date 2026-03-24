@@ -17,6 +17,18 @@ REF="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | sed -
 REF="${REF:-main}"
 ```
 
+To track `main` directly instead of the latest release, fetch from `main` and force `--ref main`:
+
+```bash
+curl -fsSL "https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-web-linux.sh" \
+  | sudo bash -s -- --ref main
+```
+
+```bash
+curl -fsSL "https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-agent-linux.sh" \
+  | sudo bash -s -- --ref main
+```
+
 ### Linux web dashboard (Debian, Ubuntu, Proxmox)
 
 Install:

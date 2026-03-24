@@ -69,6 +69,13 @@ REF="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | sed -
 REF="${REF:-main}"
 ```
 
+To track `main` directly instead of the latest release, skip the resolver and force `--ref main` in the installer call:
+
+```bash
+curl -fsSL "https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-web-linux.sh" \
+  | sudo bash -s -- --ref main
+```
+
 #### Linux web dashboard
 
 Install:

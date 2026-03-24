@@ -10,7 +10,6 @@ interface Props {
   profiles: Profile[]
   activeProfile: string
   onProfileChange: (name: string) => void
-  onProfileLoad: () => void
   onProfileSave: () => void
   onProfileDelete: () => void
   authUser?: string
@@ -31,7 +30,6 @@ export function Header({
   profiles,
   activeProfile,
   onProfileChange,
-  onProfileLoad,
   onProfileSave,
   onProfileDelete,
   authUser,
@@ -125,16 +123,6 @@ export function Header({
             <option key={profile.name} value={profile.name}>{profile.name}</option>
           ))}
         </select>
-
-        <button
-          onClick={onProfileLoad}
-          disabled={!activeProfile}
-          className="btn btn-sm w-7 px-0 justify-center"
-          aria-label="Load selected profile"
-          title="Load profile"
-        >
-          <i className="fa-solid fa-file-import text-[11px]" />
-        </button>
 
         <button
           onClick={onProfileSave}

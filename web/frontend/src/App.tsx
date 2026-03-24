@@ -209,6 +209,7 @@ type Tab = 'test' | 'results' | 'reports'
 
 export function App() {
   const didInitializeAgents = useRef(false)
+  const profileLoadSeq = useRef(0)
 
   // ── State ─────────────────────────────────────────────────────
   const [auth, setAuth] = useState<AuthSession | null>(null)
@@ -422,21 +423,37 @@ export function App() {
     })
   }, [])
 
-  const loadSelectedProfile = useCallback(async () => {
-    if (!activeProfile) {
-      toast('Select a profile first', 'info')
+  const loadProfileByName = useCallback(async (requestedName: string, showMissingToast = true) => {
+    const selectedName = requestedName.trim()
+    if (!selectedName) {
+      if (showMissingToast) {
+        toast('Select a profile first', 'info')
+      }
       return
     }
 
-    const data = await api<{ name: string; config: TestConfig }>(`/api/profiles/${encodeURIComponent(activeProfile)}`)
+    const loadSeq = ++profileLoadSeq.current
+    const data = await api<{ name: string; config: TestConfig }>(`/api/profiles/${encodeURIComponent(selectedName)}`)
     if (!data?.config) return
+    if (loadSeq !== profileLoadSeq.current) return
 
-    const profileName = (data.name || activeProfile).trim() || activeProfile
+    const profileName = (data.name || selectedName).trim() || selectedName
     window.dispatchEvent(new CustomEvent('load-profile', { detail: data.config }))
     setActiveTab('test')
     setActiveProfile(profileName)
     toast(`Loaded profile "${profileName}"`, 'ok')
-  }, [activeProfile, toast])
+  }, [toast])
+
+  const handleProfileChange = useCallback((name: string) => {
+    setActiveProfile(name)
+
+    if (!name) {
+      profileLoadSeq.current += 1
+      return
+    }
+
+    void loadProfileByName(name, false)
+  }, [loadProfileByName])
 
   const saveProfile = useCallback(async () => {
     if (!draftConfig) {
@@ -551,8 +568,7 @@ export function App() {
         onTabChange={setActiveTab}
         profiles={profiles}
         activeProfile={activeProfile}
-        onProfileChange={setActiveProfile}
-        onProfileLoad={loadSelectedProfile}
+        onProfileChange={handleProfileChange}
         onProfileSave={saveProfile}
         onProfileDelete={deleteSelectedProfile}
         authUser={auth.username}
