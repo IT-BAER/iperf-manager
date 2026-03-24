@@ -143,7 +143,7 @@ At minimum, allow the dashboard host to reach agent management and discovery:
 For test traffic, allow iperf3 ports between your selected server and client agents:
 
 - TCP and UDP iperf3 port range used by your test config (`base_port` + client count)
-- Default behavior starts from `5211`; many setups allow a wider range such as `5201-5299`
+- Dashboard test defaults start from `5201`; many setups allow a wider range such as `5201-5299`
 
 Example firewall rules (segmented setup):
 
@@ -212,7 +212,7 @@ The dashboard sends a config shape like this to `/api/test/start`:
   "server_bind": "",
   "api_key": "",
   "duration_sec": 10,
-  "base_port": 5211,
+  "base_port": 5201,
   "poll_interval_sec": 1,
   "protocol": "tcp",
   "parallel": 1,
