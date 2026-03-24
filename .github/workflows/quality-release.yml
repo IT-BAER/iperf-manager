@@ -42,11 +42,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if find . -type f -name "test_*.py" | grep -q .; then
-            python -m unittest discover -s . -p "test_*.py"
-          else
-            echo "No Python unit tests found. Skipping unittest discovery step."
-          fi
+          python - <<'PY'
+          import sys
+          import unittest
+
+          suite = unittest.defaultTestLoader.discover('.', pattern='test_*.py')
+          count = suite.countTestCases()
+          print(f'Discovered Python unit tests: {count}')
+
+          if count == 0:
+              print('No Python unit tests found. Skipping unittest execution.')
+              raise SystemExit(0)
+
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          raise SystemExit(0 if result.wasSuccessful() else 1)
+          PY
 
       - name: Validate Keep a Changelog structure
         shell: bash
