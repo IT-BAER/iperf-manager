@@ -7,7 +7,10 @@ and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
-- No changes yet.
+### Changed
+- Profile selection in the React dashboard now loads the selected profile immediately, removing the extra manual load click.
+- Added stale-request protection for profile loading so rapid selection changes do not apply older responses over newer choices.
+- Documented explicit main-branch install one-liners (`--ref main`) for deployments that should track `main` instead of the latest release tag.
 
 ## [1.0.0] - 2026-03-24
 
