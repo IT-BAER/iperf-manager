@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import type { Agent, TestConfig, ClientRow, Metrics } from '../types'
+import { SelectInput } from './SelectInput'
 
 interface NI { iface: string; ip: string }
 
@@ -226,17 +227,14 @@ export default function TopologyDiagram({
 
               <div>
                 <label className="text-[11px] text-fg-3 block mb-0.5">Bind Interface</label>
-                <select
-                  className="select-base text-[12px]"
+                <SelectInput
+                  className="w-full text-[12px]"
                   value={config.server_bind}
-                  onChange={e => onUpdate('server_bind', e.target.value)}
+                  onChange={v => onUpdate('server_bind', v)}
                   disabled={isRunning}
-                >
-                  <option value="">All interfaces</option>
-                  {serverIfaces.map(ni => (
-                    <option key={ni.ip} value={ni.ip}>{ni.iface} ({ni.ip})</option>
-                  ))}
-                </select>
+                  placeholder="All interfaces"
+                  options={serverIfaces.map(ni => ({ value: ni.ip, label: `${ni.iface} (${ni.ip})` }))}
+                />
               </div>
               <div>
                 <label className="text-[11px] text-fg-3 block mb-0.5">API Key</label>
@@ -369,31 +367,25 @@ export default function TopologyDiagram({
                     <div className="grid grid-cols-2 gap-2 mt-2">
                       <div>
                         <label className="text-[11px] text-fg-3 block mb-0.5">Bind Interface</label>
-                        <select
-                          className="select-base text-[12px]"
+                        <SelectInput
+                          className="w-full text-[12px]"
                           value={row.bind}
-                          onChange={e => onUpdateRow(i, 'bind', e.target.value)}
+                          onChange={v => onUpdateRow(i, 'bind', v)}
                           disabled={isRunning}
-                        >
-                          <option value="">Auto</option>
-                          {cIfaces.map(ni => (
-                            <option key={ni.ip} value={ni.ip}>{ni.iface} ({ni.ip})</option>
-                          ))}
-                        </select>
+                          placeholder="Auto"
+                          options={cIfaces.map(ni => ({ value: ni.ip, label: `${ni.iface} (${ni.ip})` }))}
+                        />
                       </div>
                       <div>
                         <label className="text-[11px] text-fg-3 block mb-0.5">Server Target</label>
-                        <select
-                          className="select-base text-[12px]"
+                        <SelectInput
+                          className="w-full text-[12px]"
                           value={row.server_target}
-                          onChange={e => onUpdateRow(i, 'server_target', e.target.value)}
+                          onChange={v => onUpdateRow(i, 'server_target', v)}
                           disabled={isRunning}
-                        >
-                          <option value="">Auto</option>
-                          {serverIfaces.map(ni => (
-                            <option key={ni.ip} value={ni.ip}>{ni.iface} ({ni.ip})</option>
-                          ))}
-                        </select>
+                          placeholder="Auto"
+                          options={serverIfaces.map(ni => ({ value: ni.ip, label: `${ni.iface} (${ni.ip})` }))}
+                        />
                       </div>
                     </div>
                   </div>

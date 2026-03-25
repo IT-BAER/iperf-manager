@@ -12,6 +12,7 @@ and this project adheres to Semantic Versioning.
 - Added stale-request protection for profile loading so rapid selection changes do not apply older responses over newer choices.
 - Documented explicit main-branch install one-liners (`--ref main`) for deployments that should track `main` instead of the latest release tag.
 - Modernized all dashboard dropdown controls with a consistent themed select style and updated icon treatment to match the Web UI visual language.
+- Replaced native select popups with a custom themed dropdown menu that renders above layout clipping and uses viewport-aware positioning to prevent cutoff near header and screen edges.
 - Restricted the `Quality And Release` GitHub Actions workflow to trigger only on version tag pushes (`v*`).
 - Corrected README test base-port defaults and examples to match the current dashboard default (`5201`).
 

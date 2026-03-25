@@ -36,19 +36,6 @@
       hover:border-line-bright
       focus-visible:border-accent-dim focus-visible:ring-[3px] focus-visible:ring-accent-subtle focus-visible:outline-none;
   }
-  .select-base {
-    @apply input-base pr-9 bg-surface-raised;
-    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12'%3E%3Cpath d='M3 4.5l3 3 3-3' stroke='%2358a6ff' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 11px center;
-    background-size: 12px 12px;
-  }
-  .select-base:hover {
-    @apply bg-surface;
-  }
-  .select-base:disabled {
-    @apply opacity-50 cursor-not-allowed;
-  }
   .btn {
     @apply inline-flex items-center justify-center gap-1.5
       h-8 px-3.5 text-[13px] font-medium

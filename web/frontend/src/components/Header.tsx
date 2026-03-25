@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Profile } from '../types'
+import { SelectInput } from './SelectInput'
 
 interface Props {
   connected: boolean
@@ -111,18 +112,14 @@ export function Header({
       <div className="flex-1" />
 
       <div className="flex items-center gap-1 min-w-0 max-w-[48vw]">
-        <select
+        <SelectInput
           value={activeProfile}
-          onChange={e => onProfileChange(e.target.value)}
-          className="select-base h-7 min-w-[130px] max-w-[220px] text-[12px]"
+          onChange={onProfileChange}
+          options={[...profiles.map(p => ({ value: p.name, label: p.name }))]}
+          placeholder="Profile..."
+          className="h-7 min-w-[130px] max-w-[220px] text-[12px]"
           aria-label="Select profile"
-          title="Select profile"
-        >
-          <option value="">Profile...</option>
-          {profiles.map(profile => (
-            <option key={profile.name} value={profile.name}>{profile.name}</option>
-          ))}
-        </select>
+        />
 
         <button
           onClick={onProfileSave}
