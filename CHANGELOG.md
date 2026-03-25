@@ -7,6 +7,10 @@ and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+- No changes yet.
+
+## [1.1.0] - 2026-03-25
+
 ### Added
 - Added recurring cron-based scheduled tests with dashboard APIs and persistence, supporting both profile-based runs and manual configuration snapshots.
 - Added a new Scheduled Tests panel in the React dashboard to create, enable/disable, trigger, and delete recurring schedules.
