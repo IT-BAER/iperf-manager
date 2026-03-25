@@ -6,6 +6,8 @@ SERVICE_FILE=/etc/systemd/system/${SERVICE_NAME}.service
 STATE_ENV_FILE=/etc/iperf-manager/web.env
 HASH_PYTHON_BIN=python3
 DEFAULT_WEB_PORT=5000
+DEFAULT_STATE_DIR=/var/lib/iperf-manager/dashboard
+LEGACY_STATE_DIR=/opt/iperf-manager/data/.dashboard
 
 if [[ -x /opt/iperf-manager/venv/bin/python ]]; then
 	HASH_PYTHON_BIN=/opt/iperf-manager/venv/bin/python
@@ -48,6 +50,7 @@ EXISTING_AUTH_PASSWORD=$(read_state_env DASHBOARD_AUTH_PASSWORD)
 EXISTING_AUTH_PASSWORD_HASH=$(read_state_env DASHBOARD_AUTH_PASSWORD_HASH)
 EXISTING_AUTH_DISABLED=$(read_state_env DASHBOARD_AUTH_DISABLE)
 EXISTING_COOKIE_SECURE=$(read_state_env SESSION_COOKIE_SECURE)
+EXISTING_STATE_DIR=$(read_state_env IPERF_MANAGER_STATE_DIR)
 
 EXISTING_FLASK_KEY=${EXISTING_FLASK_KEY:-$(read_service_env FLASK_SECRET)}
 EXISTING_AUTH_USER=${EXISTING_AUTH_USER:-$(read_service_env DASHBOARD_AUTH_USERNAME)}
@@ -55,6 +58,7 @@ EXISTING_AUTH_PASSWORD=${EXISTING_AUTH_PASSWORD:-$(read_service_env DASHBOARD_AU
 EXISTING_AUTH_PASSWORD_HASH=${EXISTING_AUTH_PASSWORD_HASH:-$(read_service_env DASHBOARD_AUTH_PASSWORD_HASH)}
 EXISTING_AUTH_DISABLED=${EXISTING_AUTH_DISABLED:-$(read_service_env DASHBOARD_AUTH_DISABLE)}
 EXISTING_COOKIE_SECURE=${EXISTING_COOKIE_SECURE:-$(read_service_env SESSION_COOKIE_SECURE)}
+EXISTING_STATE_DIR=${EXISTING_STATE_DIR:-$(read_service_env IPERF_MANAGER_STATE_DIR)}
 EXISTING_WEB_PORT=$(read_service_port)
 
 FLASK_KEY=${EXISTING_FLASK_KEY:-$(python3 -c "import secrets; print(secrets.token_hex(32), end='')")}
@@ -65,6 +69,8 @@ AUTH_DISABLED=${DASHBOARD_AUTH_DISABLE:-}
 COOKIE_SECURE=${SESSION_COOKIE_SECURE:-$EXISTING_COOKIE_SECURE}
 WEB_PORT=${WEB_PORT:-$EXISTING_WEB_PORT}
 WEB_PORT=${WEB_PORT:-$DEFAULT_WEB_PORT}
+WEB_STATE_DIR=${WEB_STATE_DIR:-${IPERF_MANAGER_STATE_DIR:-$EXISTING_STATE_DIR}}
+WEB_STATE_DIR=${WEB_STATE_DIR:-$DEFAULT_STATE_DIR}
 AUTH_DISABLED_FLAG=false
 AUTH_GENERATED=false
 AUTH_REUSED_EXISTING=false
@@ -101,6 +107,20 @@ if ! $AUTH_DISABLED_FLAG; then
 	fi
 fi
 
+mkdir -p "$WEB_STATE_DIR"
+chmod 700 "$WEB_STATE_DIR" || true
+
+if [[ -d "$LEGACY_STATE_DIR" && "$WEB_STATE_DIR" != "$LEGACY_STATE_DIR" ]]; then
+	for state_file in agents.json schedules.json; do
+		if [[ -f "${LEGACY_STATE_DIR}/${state_file}" && ! -f "${WEB_STATE_DIR}/${state_file}" ]]; then
+			cp -a "${LEGACY_STATE_DIR}/${state_file}" "${WEB_STATE_DIR}/${state_file}"
+		fi
+		if [[ -f "${WEB_STATE_DIR}/${state_file}" ]]; then
+			chmod 600 "${WEB_STATE_DIR}/${state_file}" || true
+		fi
+	done
+fi
+
 cat > "$SERVICE_FILE" <<SVCEOF
 [Unit]
 Description=iperf-manager Web Dashboard
@@ -117,6 +137,7 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=iperf-web
 Environment=FLASK_SECRET=${FLASK_KEY}
+Environment=IPERF_MANAGER_STATE_DIR=${WEB_STATE_DIR}
 NoNewPrivileges=true
 ProtectHome=true
 SVCEOF

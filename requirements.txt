@@ -2,5 +2,6 @@
 # Web dashboard:
 flask>=3.0
 flask-socketio>=5.3
+croniter>=2.0
 # Report generation (optional):
 matplotlib>=3.5

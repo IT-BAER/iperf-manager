@@ -63,6 +63,31 @@ export interface Profile {
   file: string
 }
 
+export interface ScheduleManualSummary {
+  server_agent: string
+  client_count: number
+  duration_sec: number
+  protocol: string
+  mode: string
+}
+
+export type ScheduleSource = 'profile' | 'manual'
+
+export interface ScheduledTest {
+  id: string
+  name: string
+  cron: string
+  enabled: boolean
+  source: ScheduleSource
+  profile_name: string
+  next_run_at: number | null
+  last_run_at: number | null
+  last_result: string
+  created_at: number
+  updated_at: number
+  manual_summary?: ScheduleManualSummary
+}
+
 export interface LogEntry {
   ts: number
   msg: string

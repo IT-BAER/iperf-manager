@@ -7,10 +7,15 @@ and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+- Added recurring cron-based scheduled tests with dashboard APIs and persistence, supporting both profile-based runs and manual configuration snapshots.
+- Added a new Scheduled Tests panel in the React dashboard to create, enable/disable, trigger, and delete recurring schedules.
+
 ### Changed
 - Profile selection in the React dashboard now loads the selected profile immediately, removing the extra manual load click.
 - Added stale-request protection for profile loading so rapid selection changes do not apply older responses over newer choices.
 - Documented explicit main-branch install one-liners (`--ref main`) for deployments that should track `main` instead of the latest release tag.
+- Hardened dashboard state persistence for deployments by moving private runtime state (agent API keys and schedules) to a configurable external directory (`IPERF_MANAGER_STATE_DIR`), with Linux service installs defaulting to `/var/lib/iperf-manager/dashboard` and automatic migration from the legacy path.
 - Modernized all dashboard dropdown controls with a consistent themed select style and updated icon treatment to match the Web UI visual language.
 - Replaced native select popups with a custom themed dropdown menu that renders above layout clipping and uses viewport-aware positioning to prevent cutoff near header and screen edges.
 - Restricted the `Quality And Release` GitHub Actions workflow to trigger only on version tag pushes (`v*`).

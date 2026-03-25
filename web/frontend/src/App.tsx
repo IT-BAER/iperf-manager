@@ -2,13 +2,14 @@
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import { useSocket } from './hooks/useSocket'
 import { api } from './api'
-import type { Agent, AuthSession, TestState, TestConfig, Metrics, LogEntry, Profile } from './types'
+import type { Agent, AuthSession, TestState, TestConfig, Metrics, LogEntry, Profile, ScheduledTest } from './types'
 
 import { AuthPanel } from './components/AuthPanel'
 import { Header } from './components/Header'
 import { Sidebar } from './components/Sidebar'
 import { KPIBar } from './components/KPIBar'
 import TestConfigPanel from './components/TestConfig'
+import SchedulePanel from './components/SchedulePanel'
 import LiveResults from './components/LiveResults'
 import { LogPanel } from './components/LogPanel'
 import ReportViewer from './components/ReportViewer'
@@ -27,6 +28,14 @@ interface ReportFile {
   rows?: number
   peak_up?: number | null
   peak_dn?: number | null
+}
+
+interface CreateSchedulePayload {
+  name: string
+  cron: string
+  source: 'profile' | 'manual'
+  profile_name?: string
+  config?: TestConfig
 }
 
 function fmtDuration(s: number | null | undefined): string {
@@ -227,6 +236,7 @@ export function App() {
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [activeProfile, setActiveProfile] = useState('')
   const [draftConfig, setDraftConfig] = useState<TestConfig | null>(null)
+  const [schedules, setSchedules] = useState<ScheduledTest[]>([])
 
   const authEnabled = auth?.enabled ?? false
   const isAuthenticated = auth ? (!auth.enabled || auth.authenticated) : false
@@ -248,6 +258,7 @@ export function App() {
     setProfiles([])
     setActiveProfile('')
     setDraftConfig(null)
+    setSchedules([])
   }, [])
 
   const loadAuth = useCallback(async () => {
@@ -502,6 +513,51 @@ export function App() {
     toast(`Deleted profile "${deletedName}"`, 'ok')
   }, [activeProfile, toast])
 
+  const loadSchedules = useCallback(async () => {
+    const data = await api<ScheduledTest[]>('/api/schedules')
+    if (!data) return
+    setSchedules(data)
+  }, [])
+
+  const createSchedule = useCallback(async (payload: CreateSchedulePayload) => {
+    const data = await api<ScheduledTest>('/api/schedules', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+    if (!data) return
+    setSchedules(prev => [...prev.filter(s => s.id !== data.id), data])
+    toast(`Added schedule "${data.name}"`, 'ok')
+  }, [toast])
+
+  const toggleScheduleEnabled = useCallback(async (schedule: ScheduledTest, enabled: boolean) => {
+    const data = await api<ScheduledTest>(`/api/schedules/${encodeURIComponent(schedule.id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    })
+    if (!data) return
+    setSchedules(prev => prev.map(s => (s.id === data.id ? data : s)))
+    toast(`${enabled ? 'Enabled' : 'Disabled'} schedule "${data.name}"`, 'ok')
+  }, [toast])
+
+  const runScheduleNow = useCallback(async (schedule: ScheduledTest) => {
+    const data = await api<{ ok?: boolean; error?: string }>(`/api/schedules/${encodeURIComponent(schedule.id)}/run`, {
+      method: 'POST',
+    })
+    if (!data) return
+    await loadSchedules()
+    toast(`Triggered schedule "${schedule.name}"`, 'ok')
+  }, [loadSchedules, toast])
+
+  const deleteSchedule = useCallback(async (schedule: ScheduledTest) => {
+    if (!window.confirm(`Delete schedule "${schedule.name}"?`)) return
+    const data = await api<{ ok: boolean; id: string }>(`/api/schedules/${encodeURIComponent(schedule.id)}`, {
+      method: 'DELETE',
+    })
+    if (!data) return
+    setSchedules(prev => prev.filter(s => s.id !== schedule.id))
+    toast(`Deleted schedule "${schedule.name}"`, 'ok')
+  }, [toast])
+
   // ── Test control ──────────────────────────────────────────────
   const startTest = useCallback(async (config: TestConfig) => {
     setLatestMetrics(null)
@@ -539,6 +595,22 @@ export function App() {
     }
     void loadProfiles()
   }, [auth, isAuthenticated, loadProfiles])
+
+  useEffect(() => {
+    if (!auth || !isAuthenticated) {
+      setSchedules([])
+      return
+    }
+    void loadSchedules()
+  }, [auth, isAuthenticated, loadSchedules])
+
+  useEffect(() => {
+    if (!auth || !isAuthenticated) return
+    const timer = window.setInterval(() => {
+      void loadSchedules()
+    }, 30000)
+    return () => window.clearInterval(timer)
+  }, [auth, isAuthenticated, loadSchedules])
 
   if (!auth) {
     return (
@@ -600,6 +672,17 @@ export function App() {
                 onStart={startTest}
                 onStop={stopTest}
                 onConfigChange={setDraftConfig}
+              />
+              <SchedulePanel
+                schedules={schedules}
+                profiles={profiles}
+                activeProfile={activeProfile}
+                draftConfig={draftConfig}
+                isRunning={testState.status !== 'idle'}
+                onCreate={createSchedule}
+                onToggleEnabled={toggleScheduleEnabled}
+                onRunNow={runScheduleNow}
+                onDelete={deleteSchedule}
               />
               <LiveResults
                 testState={testState}

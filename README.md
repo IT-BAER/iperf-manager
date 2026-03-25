@@ -176,6 +176,8 @@ Open `http://127.0.0.1:5000`.
 
 Dashboard auth is enabled by default. If you do not set credentials, startup prints a generated `admin` password. When you launch the app directly with `python main_web.py`, that generated password exists only for the current process and rotates on the next restart. For persistent service-managed credentials, configure `DASHBOARD_AUTH_USERNAME` and either `DASHBOARD_AUTH_PASSWORD_HASH` or `DASHBOARD_AUTH_PASSWORD`, or use the Linux setup script, which generates credentials on a fresh install and then preserves the stored hash on later reruns unless you explicitly override the auth settings. Existing credentials are preserved from the active service definition and, when present, `/etc/iperf-manager/web.env`. To opt out completely, set `DASHBOARD_AUTH_DISABLE=1`.
 
+Dashboard private runtime state (stored agent API keys and scheduled jobs) is persisted in `IPERF_MANAGER_STATE_DIR`. Linux service installs default this to `/var/lib/iperf-manager/dashboard` so updates to `/opt/iperf-manager` do not overwrite credentials.
+
 ### 3. Rebuild the frontend when you change the React app
 
 ```bash

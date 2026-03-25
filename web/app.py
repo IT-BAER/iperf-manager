@@ -13,12 +13,14 @@ import ipaddress
 import json
 import os
 import socket
+import secrets
 import threading
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 
+from croniter import croniter, CroniterBadCronError
 from flask import Flask, jsonify, render_template, request, send_from_directory, abort, session
 from werkzeug.security import check_password_hash
 
@@ -39,13 +41,50 @@ from core.constants import (
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 PROFILES_DIR = DATA_DIR / "profiles"
-PRIVATE_STATE_DIR = DATA_DIR / ".dashboard"
+LEGACY_PRIVATE_STATE_DIR = DATA_DIR / ".dashboard"
+
+_private_state_dir_raw = os.environ.get("IPERF_MANAGER_STATE_DIR", "").strip()
+if _private_state_dir_raw:
+    PRIVATE_STATE_DIR = Path(_private_state_dir_raw).expanduser()
+    if not PRIVATE_STATE_DIR.is_absolute():
+        PRIVATE_STATE_DIR = BASE_DIR / PRIVATE_STATE_DIR
+else:
+    PRIVATE_STATE_DIR = LEGACY_PRIVATE_STATE_DIR
+
+PRIVATE_STATE_DIR = PRIVATE_STATE_DIR.resolve()
 AGENTS_STATE_FILE = PRIVATE_STATE_DIR / "agents.json"
-PROFILES_DIR.mkdir(parents=True, exist_ok=True)
-PRIVATE_STATE_DIR.mkdir(parents=True, exist_ok=True)
+SCHEDULES_STATE_FILE = PRIVATE_STATE_DIR / "schedules.json"
+
+
+def _init_runtime_dirs() -> None:
+    """Ensure runtime directories exist and migrate legacy private state when needed."""
+    PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+    PRIVATE_STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+    try:
+        PRIVATE_STATE_DIR.chmod(0o700)
+    except OSError:
+        pass
+
+    if PRIVATE_STATE_DIR != LEGACY_PRIVATE_STATE_DIR:
+        for file_name in ("agents.json", "schedules.json"):
+            src = LEGACY_PRIVATE_STATE_DIR / file_name
+            dst = PRIVATE_STATE_DIR / file_name
+            if src.is_file() and not dst.exists():
+                try:
+                    dst.write_bytes(src.read_bytes())
+                except Exception:
+                    continue
+            if dst.is_file():
+                try:
+                    dst.chmod(0o600)
+                except OSError:
+                    pass
+
+
+_init_runtime_dirs()
 
 # ── Flask / Socket.IO setup ─────────────────────────────────────────────
-import secrets
 
 
 def _env_int(name: str, default: int) -> int:
@@ -104,6 +143,11 @@ _stop_event = threading.Event()
 _test_thread: threading.Thread | None = None
 _poller_thread: threading.Thread | None = None
 _current_csv: str | None = None
+
+_schedules: dict[str, dict] = {}
+_schedule_lock = threading.Lock()
+_scheduler_thread: threading.Thread | None = None
+_scheduler_stop = threading.Event()
 
 
 # ╔══════════════════════════════════════════════════════════════════════╗
@@ -322,7 +366,355 @@ def _redact_profile_config(config: dict | None) -> dict | None:
     return _public_test_config(config)
 
 
+def _validate_test_start_config(config: dict | None) -> str | None:
+    """Validate that a test-start payload has the required minimum shape."""
+    if not isinstance(config, dict):
+        return "config required"
+    if not str(config.get("server_agent", "") or "").strip():
+        return "server agent required"
+    clients = config.get("clients")
+    if not isinstance(clients, list) or not clients:
+        return "at least one client agent is required"
+    return None
+
+
+def _start_test_with_config(config: dict, *, trigger: str, schedule_id: str | None = None) -> tuple[dict, int]:
+    """Start a test run from the provided config payload."""
+    global _test_thread
+
+    err = _validate_test_start_config(config)
+    if err:
+        return {"error": err}, 400
+
+    with _test_lock:
+        if _test_state["status"] == "running":
+            return {"error": "test already running"}, 409
+
+        _stop_event.clear()
+        _test_state["status"] = "running"
+        _test_state["started_at"] = time.time()
+        _test_state["config"] = _public_test_config(config)
+        _test_state["trigger"] = trigger
+        if schedule_id:
+            _test_state["schedule_id"] = schedule_id
+        else:
+            _test_state.pop("schedule_id", None)
+
+    _test_thread = threading.Thread(target=_run_test_thread, args=(config,), daemon=True)
+    _test_thread.start()
+    return {"ok": True, "status": "running"}, 200
+
+
+def _normalize_cron_expression(expr: str) -> str:
+    """Collapse whitespace in cron expressions."""
+    return " ".join((expr or "").strip().split())
+
+
+def _validate_cron_expression(expr: str) -> str | None:
+    """Validate expected cron syntax (5 fields, standard minute-hour-day-month-weekday)."""
+    normalized = _normalize_cron_expression(expr)
+    if len(normalized.split()) != 5:
+        return "cron must have 5 fields: minute hour day month weekday"
+    try:
+        croniter(normalized, datetime.now())
+    except (CroniterBadCronError, ValueError):
+        return "invalid cron expression"
+    return None
+
+
+def _next_cron_timestamp(expr: str, after_ts: float) -> float | None:
+    """Compute next execution timestamp for a cron expression."""
+    try:
+        return float(croniter(_normalize_cron_expression(expr), datetime.fromtimestamp(after_ts)).get_next(float))
+    except (CroniterBadCronError, ValueError, TypeError, OSError):
+        return None
+
+
+def _manual_schedule_summary(config: dict | None) -> dict:
+    """Build a non-sensitive summary for manual schedule configs."""
+    if not isinstance(config, dict):
+        return {"server_agent": "", "client_count": 0, "duration_sec": 0, "protocol": "", "mode": ""}
+
+    clients = config.get("clients")
+    client_count = len(clients) if isinstance(clients, list) else 0
+    duration = config.get("duration_sec", 0)
+    try:
+        duration_int = int(duration)
+    except (TypeError, ValueError):
+        duration_int = 0
+
+    return {
+        "server_agent": str(config.get("server_agent", "") or ""),
+        "client_count": client_count,
+        "duration_sec": max(0, duration_int),
+        "protocol": str(config.get("protocol", "") or ""),
+        "mode": str(config.get("mode", "") or ""),
+    }
+
+
+def _public_schedule(schedule: dict) -> dict:
+    """Return a browser-safe schedule payload."""
+    public = {
+        "id": str(schedule.get("id", "") or ""),
+        "name": str(schedule.get("name", "") or ""),
+        "cron": str(schedule.get("cron", "") or ""),
+        "enabled": bool(schedule.get("enabled", False)),
+        "source": str(schedule.get("source", "profile") or "profile"),
+        "profile_name": str(schedule.get("profile_name", "") or ""),
+        "next_run_at": schedule.get("next_run_at"),
+        "last_run_at": schedule.get("last_run_at"),
+        "last_result": str(schedule.get("last_result", "") or ""),
+        "created_at": schedule.get("created_at"),
+        "updated_at": schedule.get("updated_at"),
+    }
+    if public["source"] == "manual":
+        public["manual_summary"] = _manual_schedule_summary(schedule.get("config"))
+    return public
+
+
+def _save_schedules_state_locked() -> None:
+    """Persist scheduler state to disk. Caller must hold _schedule_lock."""
+    snapshot: list[dict] = []
+    for schedule in _schedules.values():
+        source = str(schedule.get("source", "profile") or "profile")
+        item = {
+            "id": str(schedule.get("id", "") or ""),
+            "name": str(schedule.get("name", "") or ""),
+            "cron": str(schedule.get("cron", "") or ""),
+            "enabled": bool(schedule.get("enabled", False)),
+            "source": source,
+            "profile_name": str(schedule.get("profile_name", "") or ""),
+            "next_run_at": schedule.get("next_run_at"),
+            "last_run_at": schedule.get("last_run_at"),
+            "last_result": str(schedule.get("last_result", "") or ""),
+            "created_at": schedule.get("created_at"),
+            "updated_at": schedule.get("updated_at"),
+        }
+        if source == "manual" and isinstance(schedule.get("config"), dict):
+            item["config"] = schedule.get("config")
+        snapshot.append(item)
+
+    tmp_path = SCHEDULES_STATE_FILE.with_suffix(".json.tmp")
+    try:
+        tmp_path.write_text(json.dumps(snapshot, indent=2), encoding="utf-8")
+        try:
+            tmp_path.chmod(0o600)
+        except OSError:
+            pass
+        tmp_path.replace(SCHEDULES_STATE_FILE)
+        try:
+            SCHEDULES_STATE_FILE.chmod(0o600)
+        except OSError:
+            pass
+    except Exception:
+        pass
+
+
+def _save_schedules_state() -> None:
+    """Persist scheduler state with locking."""
+    with _schedule_lock:
+        _save_schedules_state_locked()
+
+
+def _load_schedules_state() -> None:
+    """Restore saved scheduler definitions from disk."""
+    try:
+        raw = json.loads(SCHEDULES_STATE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return
+
+    if not isinstance(raw, list):
+        return
+
+    now = time.time()
+    restored: dict[str, dict] = {}
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+
+        schedule_id = str(item.get("id", "") or "").strip() or secrets.token_hex(8)
+        name = str(item.get("name", "") or "").strip() or f"schedule-{schedule_id[:6]}"
+        cron_expr = _normalize_cron_expression(str(item.get("cron", "") or ""))
+        source = str(item.get("source", "profile") or "profile")
+        enabled = bool(item.get("enabled", False))
+
+        if source not in {"profile", "manual"}:
+            continue
+        if _validate_cron_expression(cron_expr):
+            continue
+
+        created_at = item.get("created_at")
+        updated_at = item.get("updated_at")
+        try:
+            created_ts = float(created_at) if created_at is not None else now
+        except (TypeError, ValueError):
+            created_ts = now
+        try:
+            updated_ts = float(updated_at) if updated_at is not None else created_ts
+        except (TypeError, ValueError):
+            updated_ts = created_ts
+
+        schedule: dict = {
+            "id": schedule_id,
+            "name": name,
+            "cron": cron_expr,
+            "enabled": enabled,
+            "source": source,
+            "last_result": str(item.get("last_result", "") or ""),
+            "created_at": created_ts,
+            "updated_at": updated_ts,
+            "last_run_at": item.get("last_run_at"),
+            "next_run_at": item.get("next_run_at"),
+        }
+
+        if source == "profile":
+            schedule["profile_name"] = Path(str(item.get("profile_name", "") or "")).name
+            if not schedule["profile_name"]:
+                continue
+        else:
+            config = item.get("config")
+            if not isinstance(config, dict):
+                continue
+            schedule["config"] = config
+
+        try:
+            next_run = float(schedule.get("next_run_at"))
+        except (TypeError, ValueError):
+            next_run = None
+
+        if enabled and (next_run is None or next_run <= now):
+            next_run = _next_cron_timestamp(cron_expr, now)
+        schedule["next_run_at"] = next_run
+
+        restored[schedule_id] = schedule
+
+    with _schedule_lock:
+        _schedules.clear()
+        _schedules.update(restored)
+
+
+def _resolve_schedule_config(schedule: dict) -> tuple[dict | None, str | None]:
+    """Resolve schedule source into a runnable config payload."""
+    source = str(schedule.get("source", "profile") or "profile")
+    if source == "profile":
+        profile_name = Path(str(schedule.get("profile_name", "") or "")).name
+        if not profile_name:
+            return None, "profile name is required"
+
+        path = PROFILES_DIR / f"{profile_name}.json"
+        if path.resolve().parent != PROFILES_DIR.resolve():
+            return None, "invalid profile name"
+        if not path.is_file():
+            return None, f"profile \"{profile_name}\" not found"
+
+        try:
+            config = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None, f"profile \"{profile_name}\" could not be read"
+
+        if not isinstance(config, dict):
+            return None, "profile config is invalid"
+        return config, None
+
+    config = schedule.get("config")
+    if not isinstance(config, dict):
+        return None, "manual config is missing"
+    return dict(config), None
+
+
+def _set_schedule_result(schedule_id: str, result: str, *, mark_run: bool) -> None:
+    """Update schedule run status and persist the result."""
+    with _schedule_lock:
+        schedule = _schedules.get(schedule_id)
+        if not schedule:
+            return
+        now = time.time()
+        if mark_run:
+            schedule["last_run_at"] = now
+        schedule["last_result"] = result
+        schedule["updated_at"] = now
+        _save_schedules_state_locked()
+
+
+def _execute_schedule(schedule_id: str) -> None:
+    """Run a due schedule once."""
+    with _schedule_lock:
+        schedule = _schedules.get(schedule_id)
+        if not schedule or not schedule.get("enabled", False):
+            return
+        schedule_copy = dict(schedule)
+
+    config, err = _resolve_schedule_config(schedule_copy)
+    if err:
+        _set_schedule_result(schedule_id, f"error: {err}", mark_run=False)
+        return
+
+    response, status = _start_test_with_config(config, trigger="schedule", schedule_id=schedule_id)
+    if status == 200:
+        _set_schedule_result(schedule_id, "started", mark_run=True)
+    else:
+        reason = str(response.get("error", "not started") or "not started")
+        _set_schedule_result(schedule_id, f"skipped: {reason}", mark_run=False)
+
+
+def _scheduler_worker() -> None:
+    """Background scheduler loop that checks for due cron jobs."""
+    while not _scheduler_stop.is_set():
+        now = time.time()
+        due_ids: list[str] = []
+
+        with _schedule_lock:
+            changed = False
+            for schedule_id, schedule in _schedules.items():
+                if not schedule.get("enabled", False):
+                    continue
+
+                cron_expr = str(schedule.get("cron", "") or "")
+                next_run = schedule.get("next_run_at")
+                try:
+                    next_ts = float(next_run)
+                except (TypeError, ValueError):
+                    next_ts = _next_cron_timestamp(cron_expr, now)
+                    schedule["next_run_at"] = next_ts
+                    schedule["updated_at"] = now
+                    changed = True
+
+                if next_ts is None:
+                    schedule["enabled"] = False
+                    schedule["last_result"] = "error: invalid cron expression"
+                    schedule["updated_at"] = now
+                    changed = True
+                    continue
+
+                if now + 0.2 < next_ts:
+                    continue
+
+                due_ids.append(schedule_id)
+                schedule["next_run_at"] = _next_cron_timestamp(cron_expr, now + 1)
+                schedule["updated_at"] = now
+                changed = True
+
+            if changed:
+                _save_schedules_state_locked()
+
+        for schedule_id in due_ids:
+            _execute_schedule(schedule_id)
+
+        _scheduler_stop.wait(1.0)
+
+
+def _start_scheduler_worker() -> None:
+    """Start the recurring schedule worker once."""
+    global _scheduler_thread
+    if _scheduler_thread and _scheduler_thread.is_alive():
+        return
+    _scheduler_stop.clear()
+    _scheduler_thread = threading.Thread(target=_scheduler_worker, name="schedule-worker", daemon=True)
+    _scheduler_thread.start()
+
+
 _load_agents_state()
+_load_schedules_state()
 
 
 @app.before_request
@@ -676,6 +1068,8 @@ def _run_test_thread(config: dict):
         _test_state["status"] = "idle"
         _test_state["last_csv"] = csv_name
         _test_state["finished_at"] = time.time()
+        _test_state.pop("trigger", None)
+        _test_state.pop("schedule_id", None)
 
     socketio.emit("test_completed", {
         "ts": time.time(),
@@ -936,34 +1330,187 @@ def delete_profile(name):
 
 
 # ╔══════════════════════════════════════════════════════════════════════╗
+# ║  Routes – Schedules                                                 ║
+# ╚══════════════════════════════════════════════════════════════════════╝
+
+@app.route("/api/schedules", methods=["GET"])
+def list_schedules():
+    with _schedule_lock:
+        schedules = [_public_schedule(dict(schedule)) for schedule in _schedules.values()]
+    schedules.sort(key=lambda schedule: str(schedule.get("name", "")).lower())
+    return jsonify(schedules)
+
+
+@app.route("/api/schedules", methods=["POST"])
+def create_schedule():
+    data = request.get_json(force=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "request body must be an object"}), 400
+
+    name = str(data.get("name", "") or "").strip()
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+
+    cron_expr = _normalize_cron_expression(str(data.get("cron", "") or ""))
+    cron_err = _validate_cron_expression(cron_expr)
+    if cron_err:
+        return jsonify({"error": cron_err}), 400
+
+    source = str(data.get("source", "profile") or "profile").strip().lower()
+    if source not in {"profile", "manual"}:
+        return jsonify({"error": "source must be profile or manual"}), 400
+
+    now = time.time()
+    enabled = bool(data.get("enabled", True))
+    schedule: dict = {
+        "id": "",
+        "name": name,
+        "cron": cron_expr,
+        "enabled": enabled,
+        "source": source,
+        "next_run_at": _next_cron_timestamp(cron_expr, now) if enabled else None,
+        "last_run_at": None,
+        "last_result": "",
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    if source == "profile":
+        profile_name = Path(str(data.get("profile_name", "") or "")).name
+        if not profile_name:
+            return jsonify({"error": "profile_name is required for profile schedules"}), 400
+        path = PROFILES_DIR / f"{profile_name}.json"
+        if path.resolve().parent != PROFILES_DIR.resolve():
+            return jsonify({"error": "invalid profile_name"}), 400
+        if not path.is_file():
+            return jsonify({"error": "profile not found"}), 404
+        schedule["profile_name"] = profile_name
+    else:
+        config = data.get("config")
+        err = _validate_test_start_config(config)
+        if err:
+            return jsonify({"error": f"manual schedule config invalid: {err}"}), 400
+        schedule["config"] = config
+
+    with _schedule_lock:
+        schedule_id = secrets.token_hex(8)
+        while schedule_id in _schedules:
+            schedule_id = secrets.token_hex(8)
+        schedule["id"] = schedule_id
+        _schedules[schedule_id] = schedule
+        _save_schedules_state_locked()
+
+    return jsonify(_public_schedule(dict(schedule))), 201
+
+
+@app.route("/api/schedules/<schedule_id>", methods=["PATCH"])
+def update_schedule(schedule_id):
+    data = request.get_json(force=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "request body must be an object"}), 400
+
+    with _schedule_lock:
+        existing = _schedules.get(schedule_id)
+        if not existing:
+            return jsonify({"error": "not found"}), 404
+        updated = dict(existing)
+
+    if "name" in data:
+        name = str(data.get("name", "") or "").strip()
+        if not name:
+            return jsonify({"error": "name cannot be empty"}), 400
+        updated["name"] = name
+
+    if "cron" in data:
+        cron_expr = _normalize_cron_expression(str(data.get("cron", "") or ""))
+        cron_err = _validate_cron_expression(cron_expr)
+        if cron_err:
+            return jsonify({"error": cron_err}), 400
+        updated["cron"] = cron_expr
+
+    if "enabled" in data:
+        updated["enabled"] = bool(data.get("enabled"))
+
+    if "source" in data:
+        source = str(data.get("source", "") or "").strip().lower()
+        if source not in {"profile", "manual"}:
+            return jsonify({"error": "source must be profile or manual"}), 400
+        updated["source"] = source
+
+    source = str(updated.get("source", "profile") or "profile")
+    if source == "profile":
+        profile_name = data.get("profile_name") if "profile_name" in data else updated.get("profile_name", "")
+        safe_name = Path(str(profile_name or "")).name
+        if not safe_name:
+            return jsonify({"error": "profile_name is required for profile schedules"}), 400
+        path = PROFILES_DIR / f"{safe_name}.json"
+        if path.resolve().parent != PROFILES_DIR.resolve():
+            return jsonify({"error": "invalid profile_name"}), 400
+        if not path.is_file():
+            return jsonify({"error": "profile not found"}), 404
+        updated["profile_name"] = safe_name
+        updated.pop("config", None)
+    else:
+        config = data.get("config") if "config" in data else updated.get("config")
+        err = _validate_test_start_config(config)
+        if err:
+            return jsonify({"error": f"manual schedule config invalid: {err}"}), 400
+        updated["config"] = config
+        updated.pop("profile_name", None)
+
+    now = time.time()
+    if "cron" in data or "enabled" in data or "source" in data:
+        updated["next_run_at"] = _next_cron_timestamp(updated["cron"], now) if updated.get("enabled") else None
+    updated["updated_at"] = now
+
+    with _schedule_lock:
+        _schedules[schedule_id] = updated
+        _save_schedules_state_locked()
+
+    return jsonify(_public_schedule(dict(updated)))
+
+
+@app.route("/api/schedules/<schedule_id>", methods=["DELETE"])
+def delete_schedule(schedule_id):
+    with _schedule_lock:
+        schedule = _schedules.pop(schedule_id, None)
+        if not schedule:
+            return jsonify({"error": "not found"}), 404
+        _save_schedules_state_locked()
+    return jsonify({"ok": True, "id": schedule_id})
+
+
+@app.route("/api/schedules/<schedule_id>/run", methods=["POST"])
+def run_schedule_now(schedule_id):
+    with _schedule_lock:
+        schedule = _schedules.get(schedule_id)
+        if not schedule:
+            return jsonify({"error": "not found"}), 404
+        schedule_copy = dict(schedule)
+
+    config, err = _resolve_schedule_config(schedule_copy)
+    if err:
+        _set_schedule_result(schedule_id, f"error: {err}", mark_run=False)
+        return jsonify({"error": err}), 400
+
+    response, status = _start_test_with_config(config, trigger="schedule", schedule_id=schedule_id)
+    if status == 200:
+        _set_schedule_result(schedule_id, "started", mark_run=True)
+    else:
+        reason = str(response.get("error", "not started") or "not started")
+        _set_schedule_result(schedule_id, f"skipped: {reason}", mark_run=False)
+    return jsonify(response), status
+
+
+# ╔══════════════════════════════════════════════════════════════════════╗
 # ║  Routes – Test Control                                              ║
 # ╚══════════════════════════════════════════════════════════════════════╝
 
 @app.route("/api/test/start", methods=["POST"])
 def start_test():
-    global _test_thread
-    with _test_lock:
-        if _test_state["status"] == "running":
-            return jsonify({"error": "test already running"}), 409
-
     config = request.get_json(force=True)
-    if not config:
-        return jsonify({"error": "config required"}), 400
-    if not str(config.get("server_agent", "") or "").strip():
-        return jsonify({"error": "server agent required"}), 400
-    clients = config.get("clients")
-    if not isinstance(clients, list) or not clients:
-        return jsonify({"error": "at least one client agent is required"}), 400
-
-    _stop_event.clear()
-    with _test_lock:
-        _test_state["status"] = "running"
-        _test_state["started_at"] = time.time()
-        _test_state["config"] = _public_test_config(config)
-
-    _test_thread = threading.Thread(target=_run_test_thread, args=(config,), daemon=True)
-    _test_thread.start()
-    return jsonify({"ok": True, "status": "running"})
+    response, status = _start_test_with_config(config, trigger="manual")
+    return jsonify(response), status
 
 
 @app.route("/api/test/stop", methods=["POST"])
@@ -1160,6 +1707,9 @@ def meta():
         "protocols": PROTOCOLS,
         "default_base_port": DEFAULT_BASE_PORT,
     })
+
+
+_start_scheduler_worker()
 
 
 # ╔══════════════════════════════════════════════════════════════════════╗

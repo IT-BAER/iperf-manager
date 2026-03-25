@@ -52,6 +52,29 @@ curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/deploy/install-web-
   | sudo bash -s -- --update
 ```
 
+Staged local-tree update (preserves private dashboard state like stored agent API keys):
+
+```bash
+# on your workstation
+tar -czf /tmp/iperf-manager-deploy.tar.gz \
+  --exclude='node_modules' \
+  --exclude='venv' \
+  --exclude='__pycache__' \
+  --exclude='.git' \
+  --exclude='web/frontend/dist' \
+  --exclude='*.pyc' \
+  --exclude='data/.dashboard' \
+  -C /path/to/iperf-manager .
+
+# on target host
+sudo tar -xzf /tmp/iperf-manager-deploy.tar.gz -C /opt/iperf-manager
+cd /opt/iperf-manager/web/frontend && npm install && npm run build
+cd /opt/iperf-manager && /opt/iperf-manager/venv/bin/pip install -r requirements.txt
+sudo bash /opt/iperf-manager/deploy/setup-web-service.sh
+```
+
+`setup-web-service.sh` stores private dashboard state under `/var/lib/iperf-manager/dashboard` by default and migrates old state from `/opt/iperf-manager/data/.dashboard` on first run.
+
 Uninstall service only:
 
 ```bash
