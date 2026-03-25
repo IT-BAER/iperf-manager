@@ -51,3 +51,4 @@ _tmp_*.json
 *.prompt.md
 *.agent.md
 AGENTS.md
+.github/copilot-instructions.md
