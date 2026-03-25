@@ -903,9 +903,41 @@ def _resolve_agent_url(agent_id: str) -> str:
 def _normalize_config(raw: dict) -> dict:
     """Transform frontend config shape into the format run_test expects."""
     server_id = raw.get("server_agent", "")
-    server_url = _resolve_agent_url(server_id) if server_id else ""
     with _agents_lock:
         agent_snapshot = {aid: dict(info) for aid, info in _agents.items()}
+
+    def _agent_info_for_ref(agent_ref: str) -> dict:
+        if not agent_ref:
+            return {}
+
+        direct = agent_snapshot.get(agent_ref)
+        if direct:
+            return direct
+
+        ref_url = ""
+        try:
+            ref_url = _normalize_agent_url(str(agent_ref))
+        except ValueError:
+            ref_url = str(agent_ref or "").strip()
+
+        if not ref_url:
+            return {}
+
+        for info in agent_snapshot.values():
+            if str(info.get("url", "") or "").strip() == ref_url:
+                return info
+        return {}
+
+    def _agent_url_for_ref(agent_ref: str) -> str:
+        if not agent_ref:
+            return ""
+        info = _agent_info_for_ref(agent_ref)
+        if info:
+            return str(info.get("url", "") or "")
+        return _resolve_agent_url(agent_ref)
+
+    server_info = _agent_info_for_ref(server_id)
+    server_url = _agent_url_for_ref(server_id) if server_id else ""
 
     # Derive server IP from its URL for default client target
     server_ip = ""
@@ -916,7 +948,6 @@ def _normalize_config(raw: dict) -> dict:
             pass
 
     # Resolve server display name from agents dict
-    server_info = agent_snapshot.get(server_id, {})
     server_name = server_info.get("name", server_id)
     server_api_key = str(server_info.get("api_key", "") or "")
 
@@ -927,12 +958,12 @@ def _normalize_config(raw: dict) -> dict:
     clients = []
     for c in raw.get("clients", []):
         agent_id = c.get("agent", "")
-        agent_info = agent_snapshot.get(agent_id, {})
+        agent_info = _agent_info_for_ref(agent_id)
         agent_api_key = str(agent_info.get("api_key", "") or "")
         target = c.get("server_target") or c.get("target", "") or server_bind or server_ip
         client_entry: dict = {
-            "agent": _resolve_agent_url(agent_id) if agent_id else "",
-            "name": c.get("name") or agent_id,
+            "agent": _agent_url_for_ref(agent_id) if agent_id else "",
+            "name": c.get("name") or agent_info.get("name") or agent_id,
             "target": target,
             "api_key": c.get("api_key", "") or agent_api_key,
         }

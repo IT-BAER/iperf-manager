@@ -16,6 +16,7 @@ and this project adheres to Semantic Versioning.
 - Added stale-request protection for profile loading so rapid selection changes do not apply older responses over newer choices.
 - Documented explicit main-branch install one-liners (`--ref main`) for deployments that should track `main` instead of the latest release tag.
 - Hardened dashboard state persistence for deployments by moving private runtime state (agent API keys and schedules) to a configurable external directory (`IPERF_MANAGER_STATE_DIR`), with Linux service installs defaulting to `/var/lib/iperf-manager/dashboard` and automatic migration from the legacy path.
+- Normalized test/schedule agent references by both agent ID and URL so legacy profile/schedule payloads still resolve stored API keys correctly and avoid 403 errors on `server/start` and `client/start`.
 - Modernized all dashboard dropdown controls with a consistent themed select style and updated icon treatment to match the Web UI visual language.
 - Replaced native select popups with a custom themed dropdown menu that renders above layout clipping and uses viewport-aware positioning to prevent cutoff near header and screen edges.
 - Restricted the `Quality And Release` GitHub Actions workflow to trigger only on version tag pushes (`v*`).
