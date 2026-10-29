@@ -7,7 +7,8 @@ and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
-- No changes yet.
+### Fixed
+- Agents now record the real iperf3 client exit code; before, a client whose output closed before the process was reaped kept `exit_code: null` in `/status`, `/metrics` and the client log.
 
 ## [1.1.0] - 2026-03-25
 
