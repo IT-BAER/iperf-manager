@@ -293,6 +293,17 @@ $pyMajor = $pythonInfo.Major
 $pyMinor = $pythonInfo.Minor
 Write-Ok "Python found: $PythonBin ($pyMajor.$pyMinor)"
 
+$existingConfig = Join-Path $ConfigDir "config.json"
+if (-not $Token -and (Test-Path $existingConfig)) {
+    # Reruns keep the existing token; a new one would break every key stored in the dashboard.
+    try {
+        $Token = [string]((Get-Content -Raw -LiteralPath $existingConfig | ConvertFrom-Json).api_token)
+    } catch {
+        $Token = ""
+    }
+    if ($Token) { Write-Ok "Keeping existing API token from $existingConfig" }
+}
+
 if (-not $Token) {
     $bytes = New-Object byte[] 32
     $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()

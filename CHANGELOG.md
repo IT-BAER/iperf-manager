@@ -11,6 +11,8 @@ and this project adheres to Semantic Versioning.
 - Default test base port is now `5211` in the dashboard, the backend fallback and the README, matching the agents' iperf3 autostart ports (`5211,5212`) and `/api/meta`. Saved profiles keep their stored port.
 
 ### Fixed
+- Agent installers (`install-agent-linux.sh`, `Install-Agent.ps1`) keep the existing API token on reruns such as `--update`; before, they generated a new token and broke every key stored in the dashboard.
+- `setup-web-service.sh` now passes extra settings from `/etc/iperf-manager/web.env` (for example `DASHBOARD_DISCOVERY_CIDRS`, `DASHBOARD_DISCOVERY_BROADCAST`) into the service; before, they were ignored. Keys the script manages itself (Flask secret, dashboard auth, cookie and state dir) stay authoritative.
 - The dashboard live chart no longer freezes mid-test: the metrics poller kept running only until the first zero-throughput poll (a 0 Mbit/s interval or an agent that missed two polls) and then stopped for the rest of the test.
 - Profile dropdown: shows "No saved profiles" instead of an empty strip, widens for long names and truncates them with a tooltip, keeps a fixed width in the header, shows the placeholder muted, and offers "No profile" to clear the selection.
 - Switching to Reports and back no longer resets the test setup, live chart and log.
