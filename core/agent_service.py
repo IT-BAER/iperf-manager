@@ -700,7 +700,11 @@ class AgentService:
                                     lj['interval_mbps'] = mbps
                                 info['last_json'] = lj
             finally:
-                code = proc.poll()
+                # stdout EOF can arrive before the process is reaped; poll() would return None.
+                try:
+                    code = proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    code = None
                 try:
                     lf.write(f"\n[exit_code] {code}\n")
                     lf.close()
