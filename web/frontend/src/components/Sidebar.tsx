@@ -139,7 +139,7 @@ export function Sidebar({ open, agents, onRefresh, onAdd, onUpdateAgentKey, onRe
       <div className="flex-1 overflow-y-auto">
         {agents.length === 0 ? (
           <div className="p-4 text-center text-fg-3 text-[13px]">
-            No agents. Click Discover or + to add.
+            {isRefreshing ? 'Loading agents…' : 'No agents. Click Discover or + to add.'}
           </div>
         ) : (
           <ul className="divide-y divide-line">
@@ -177,9 +177,12 @@ export function Sidebar({ open, agents, onRefresh, onAdd, onUpdateAgentKey, onRe
                       <i className="fa-solid fa-key text-[10px]" />
                     </button>
                     <button
-                      onClick={() => onRemove(agent.id)}
-                      className="text-fg-3 hover:text-err active:scale-90 opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={() => {
+                        if (window.confirm(`Remove agent "${agent.name}"? Its stored API key is deleted too.`)) onRemove(agent.id)
+                      }}
+                      className="text-fg-3 hover:text-err active:scale-90 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
                       aria-label={`Remove ${agent.name}`}
+                      title="Remove agent"
                     >
                       <i className="fa-solid fa-xmark text-[11px]" />
                     </button>

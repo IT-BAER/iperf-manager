@@ -16,6 +16,7 @@ import socket
 import secrets
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
@@ -770,6 +771,14 @@ def _refresh_agent(aid: str, info: dict) -> dict:
     return info
 
 
+def _refresh_agents(agents: dict) -> None:
+    """Probe agents in parallel so offline agents (several seconds each) do not add up."""
+    if not agents:
+        return
+    with ThreadPoolExecutor(max_workers=min(32, len(agents))) as pool:
+        list(pool.map(lambda item: _refresh_agent(*item), agents.items()))
+
+
 def _discover_agents(timeout: float = 3.0) -> list[dict]:
     """Discover agents via unicast targets, with optional UDP broadcast."""
     found_by_url: dict[str, dict] = {}
@@ -980,7 +989,7 @@ def _normalize_config(raw: dict) -> dict:
         },
         "clients": clients,
         "duration_sec": raw.get("duration_sec", 10),
-        "base_port": raw.get("base_port", 5201),
+        "base_port": raw.get("base_port", DEFAULT_BASE_PORT),
         "poll_interval_sec": raw.get("poll_interval_sec", 1),
         "mode": mode,
         "api_key": raw.get("api_key", ""),
@@ -1212,8 +1221,7 @@ def list_agents():
         agents = dict(_agents)
     # Optionally refresh on request
     if request.args.get("refresh") == "1":
-        for aid, info in agents.items():
-            _refresh_agent(aid, info)
+        _refresh_agents(agents)
         with _agents_lock:
             agents = dict(_agents)
     return jsonify([_public_agent(info) for info in agents.values()])
@@ -1760,7 +1768,6 @@ def handle_ping_agents():
     """Client requests a live refresh of all agents."""
     with _agents_lock:
         agents = dict(_agents)
-    for aid, info in agents.items():
-        _refresh_agent(aid, info)
+    _refresh_agents(agents)
     with _agents_lock:
         emit("agents_update", [_public_agent(info) for info in _agents.values()])

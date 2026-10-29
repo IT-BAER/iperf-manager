@@ -4,13 +4,16 @@ import TopologyDiagram from './TopologyDiagram'
 
 const MODES = ['bidirectional', 'upload', 'download'] as const
 const PROTOCOLS = ['tcp', 'udp'] as const
+const MAX_DURATION_SEC = 86400 // iperf3 rejects longer -t values
+// Profiles written by the backend or older versions use the runner's mode names.
+const MODE_ALIASES: Record<string, string> = { bidir: 'bidirectional', up_only: 'upload', down_only: 'download' }
 
 const DEFAULT_CONFIG: TestConfig = {
   server_agent: '',
   server_bind: '',
   api_key: '',
   duration_sec: 10,
-  base_port: 5201,
+  base_port: 5211,
   poll_interval_sec: 1,
   protocol: 'tcp',
   parallel: 1,
@@ -25,6 +28,11 @@ function clampNumber(value: unknown, fallback: number, min = Number.NEGATIVE_INF
   const parsed = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(parsed)) return fallback
   return Math.max(min, parsed)
+}
+
+function normalizeMode(raw: unknown): string {
+  const mode = typeof raw === 'string' ? (MODE_ALIASES[raw] ?? raw) : ''
+  return (MODES as readonly string[]).includes(mode) ? mode : DEFAULT_CONFIG.mode
 }
 
 function normalizeLoadedConfig(raw: unknown): TestConfig {
@@ -52,7 +60,7 @@ function normalizeLoadedConfig(raw: unknown): TestConfig {
     server_agent: String(cfg.server_agent || ''),
     server_bind: String(cfg.server_bind || ''),
     api_key: String(cfg.api_key || ''),
-    duration_sec: Math.floor(clampNumber(cfg.duration_sec, DEFAULT_CONFIG.duration_sec, 1)),
+    duration_sec: Math.min(MAX_DURATION_SEC, Math.floor(clampNumber(cfg.duration_sec, DEFAULT_CONFIG.duration_sec, 1))),
     base_port: Math.floor(clampNumber(cfg.base_port, DEFAULT_CONFIG.base_port, 1)),
     poll_interval_sec: clampNumber(cfg.poll_interval_sec, DEFAULT_CONFIG.poll_interval_sec, 0.1),
     protocol: cfg.protocol === 'udp' ? 'udp' : 'tcp',
@@ -60,7 +68,7 @@ function normalizeLoadedConfig(raw: unknown): TestConfig {
     omit_sec: Math.floor(clampNumber(cfg.omit_sec, DEFAULT_CONFIG.omit_sec, 0)),
     bitrate: String(cfg.bitrate || ''),
     tcp_window: String(cfg.tcp_window || ''),
-    mode: typeof cfg.mode === 'string' && cfg.mode ? cfg.mode : DEFAULT_CONFIG.mode,
+    mode: normalizeMode(cfg.mode),
     clients,
   }
 }
@@ -179,9 +187,7 @@ export default function TestConfigPanel({
           <span className="text-[13px] font-semibold text-fg">Test Configuration</span>
           {statusLabel && <span className="text-[12px] text-fg-3">{statusLabel}</span>}
         </div>
-        <span className={`text-fg-3 text-lg leading-none transition-transform duration-150 ${open ? '' : '-rotate-90'}`}>
-          ▾
-        </span>
+        <i className={`fa-solid fa-chevron-down text-fg-3 text-[11px] transition-transform duration-150 ${open ? '' : '-rotate-90'}`} />
       </div>
 
       {/* ── Body ────────────────────────────────────────────── */}
@@ -227,7 +233,7 @@ export default function TestConfigPanel({
             className="flex items-center gap-2 w-full text-left mb-2"
             onClick={() => setShowParams(p => !p)}
           >
-            <span className={`text-fg-3 text-xs leading-none transition-transform duration-150 ${showParams ? '' : '-rotate-90'}`}>▾</span>
+            <i className={`fa-solid fa-chevron-down text-fg-3 text-[10px] transition-transform duration-150 ${showParams ? '' : '-rotate-90'}`} />
             <span className={SL + ' mb-0'}>Parameters &amp; Options</span>
           </button>
 
@@ -239,10 +245,11 @@ export default function TestConfigPanel({
               <input
                 id="duration-sec"
                 name="durationSec"
-                type="number" min={1}
+                type="number" min={1} max={MAX_DURATION_SEC}
+                title="iperf3 limits one test to 86400 s (24 h)"
                 className="input-base"
                 value={config.duration_sec}
-                onChange={e => update('duration_sec', Math.max(1, parseInt(e.target.value) || 1))}
+                onChange={e => update('duration_sec', Math.min(MAX_DURATION_SEC, Math.max(1, parseInt(e.target.value) || 1)))}
                 disabled={isRunning}
               />
             </div>
@@ -254,7 +261,7 @@ export default function TestConfigPanel({
                 type="number" min={1024} max={65534}
                 className="input-base"
                 value={config.base_port}
-                onChange={e => update('base_port', parseInt(e.target.value) || 5201)}
+                onChange={e => update('base_port', parseInt(e.target.value) || DEFAULT_CONFIG.base_port)}
                 disabled={isRunning}
               />
             </div>

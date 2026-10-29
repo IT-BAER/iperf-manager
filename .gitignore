@@ -26,6 +26,7 @@ data/*.log
 data/*.html
 data/*.png
 data/.dashboard/
+data/profiles/*.json
 data/deployment-rollout-*.md
 
 # iperf3 binaries (download separately)

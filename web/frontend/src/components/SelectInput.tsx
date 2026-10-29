@@ -13,6 +13,9 @@ interface Props {
   disabled?: boolean
   className?: string
   placeholder?: string
+  emptyLabel?: string
+  fullWidth?: boolean
+  id?: string
   'aria-label'?: string
 }
 
@@ -20,7 +23,7 @@ interface Props {
  * Fully themed dropdown replacing native <select>.
  * Trigger looks like .btn; option list uses surface tokens so it matches the dark UI.
  */
-export function SelectInput({ value, onChange, options, disabled, className = '', placeholder = '—', 'aria-label': ariaLabel }: Props) {
+export function SelectInput({ value, onChange, options, disabled, className = '', placeholder = '—', emptyLabel = 'No options', fullWidth = false, id, 'aria-label': ariaLabel }: Props) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
@@ -34,7 +37,8 @@ export function SelectInput({ value, onChange, options, disabled, className = ''
 
     const viewportPadding = 8
     const anchorGap = 6
-    const menuWidth = rect.width
+    // At least as wide as the trigger; long labels may widen it up to 320px, then truncate.
+    const menuWidth = Math.min(Math.max(rect.width, 320), window.innerWidth - viewportPadding * 2)
     const availableBelow = window.innerHeight - rect.bottom - viewportPadding - anchorGap
     const availableAbove = rect.top - viewportPadding - anchorGap
     const openUpward = availableBelow < 160 && availableAbove > availableBelow
@@ -44,14 +48,18 @@ export function SelectInput({ value, onChange, options, disabled, className = ''
       ? Math.max(viewportPadding, rect.top - estimatedHeight - anchorGap)
       : rect.bottom + anchorGap
 
-    const maxLeft = Math.max(viewportPadding, window.innerWidth - menuWidth - viewportPadding)
-    const left = Math.min(Math.max(rect.left, viewportPadding), maxLeft)
+    // Near the right edge, grow leftwards from the trigger's right edge instead of overflowing.
+    const alignRight = rect.left + menuWidth > window.innerWidth - viewportPadding
+    const horizontal = alignRight
+      ? { right: Math.max(viewportPadding, window.innerWidth - rect.right) }
+      : { left: Math.max(rect.left, viewportPadding) }
 
     setListStyle({
       position: 'fixed',
       top,
-      left,
-      width: menuWidth,
+      ...horizontal,
+      minWidth: rect.width,
+      maxWidth: menuWidth,
       maxHeight,
       overflowY: 'auto',
       zIndex: 2147483647,
@@ -101,21 +109,22 @@ export function SelectInput({ value, onChange, options, disabled, className = ''
   const label = selected ? selected.label : placeholder
 
   return (
-    <div ref={rootRef} className="relative inline-block">
+    <div ref={rootRef} className={fullWidth ? 'relative block w-full' : 'relative inline-block'}>
       <button
         ref={btnRef}
+        id={id}
         type="button"
         disabled={disabled}
         onClick={() => {
           if (!open) updatePosition()
           setOpen(v => !v)
         }}
-        className={`btn justify-between gap-2 pr-2.5 ${className}`}
+        className={`btn justify-between gap-2 pr-2.5 ${fullWidth ? 'w-full' : ''} ${className}`}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={ariaLabel}
       >
-        <span className="truncate">{label}</span>
+        <span className={`truncate ${selected ? '' : 'text-fg-3 font-normal'}`} title={selected ? selected.label : undefined}>{label}</span>
         <i
           className={`fa-solid fa-chevron-down text-[9px] text-fg-3 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
         />
@@ -128,6 +137,9 @@ export function SelectInput({ value, onChange, options, disabled, className = ''
           style={listStyle}
           className="rounded-sm border border-line bg-surface-raised shadow-[0_10px_28px_rgba(0,0,0,0.55)] overflow-hidden"
         >
+          {options.length === 0 && (
+            <div className="px-3 py-1.5 text-[13px] text-fg-3 whitespace-nowrap">{emptyLabel}</div>
+          )}
           {options.map(opt => {
             const isSelected = opt.value === value
             return (
@@ -136,8 +148,9 @@ export function SelectInput({ value, onChange, options, disabled, className = ''
                 type="button"
                 role="option"
                 aria-selected={isSelected}
+                title={opt.label}
                 onClick={() => { onChange(opt.value); setOpen(false) }}
-                className={`w-full text-left px-3 py-1.5 text-[13px] transition-colors duration-100 whitespace-nowrap
+                className={`block w-full text-left px-3 py-1.5 text-[13px] transition-colors duration-100 whitespace-nowrap truncate
                   ${isSelected
                     ? 'text-accent font-medium bg-accent/10'
                     : 'text-fg hover:bg-surface-hover'

@@ -2,6 +2,7 @@
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import { useSocket } from './hooks/useSocket'
 import { api } from './api'
+import { formatMbps as fmtMbps } from './format'
 import type { Agent, AuthSession, TestState, TestConfig, Metrics, LogEntry, Profile, ScheduledTest } from './types'
 
 import { AuthPanel } from './components/AuthPanel'
@@ -44,12 +45,6 @@ function fmtDuration(s: number | null | undefined): string {
   return `${Math.floor(s / 60)}m ${s % 60}s`
 }
 
-function fmtMbps(mbps: number | null | undefined): string {
-  if (mbps == null) return '—'
-  if (mbps >= 1000) return `${(mbps / 1000).toFixed(2)} Gbps`
-  return `${mbps.toFixed(1)} Mbps`
-}
-
 function fmtDateTime(name: string): string {
   // test_20260318_095111.csv → 2026-03-18 09:51:11
   const m = name.match(/test_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/)
@@ -89,6 +84,7 @@ function ReportList({ onSelect }: { onSelect: (name: string) => void }) {
 
   const deleteSelected = async () => {
     if (selected.size === 0) return
+    if (!window.confirm(`Delete ${selected.size} report${selected.size > 1 ? 's' : ''}?`)) return
     setDeleting(true)
     try {
       const data = await api<{ deleted: string[] }>('/api/reports', {
@@ -106,6 +102,7 @@ function ReportList({ onSelect }: { onSelect: (name: string) => void }) {
 
   const deleteSingle = async (name: string, e: ReactMouseEvent) => {
     e.stopPropagation()
+    if (!window.confirm(`Delete report "${name}"?`)) return
     const data = await api<{ deleted: string }>(`/api/reports/${encodeURIComponent(name)}`, { method: 'DELETE' })
     if (!data) return
     window.dispatchEvent(new CustomEvent('toast', { detail: { msg: `Deleted ${name}`, type: 'ok' } }))
@@ -123,7 +120,7 @@ function ReportList({ onSelect }: { onSelect: (name: string) => void }) {
   return (
     <div className="panel">
       <div className="px-4 py-3 border-b border-line flex items-center gap-3">
-        <h3 className="text-sm font-semibold flex-1">Reports <span className="text-fg-3 font-normal">({files.length})</span></h3>
+        <span className="text-[13px] font-semibold text-fg flex-1">Reports <span className="text-fg-3 font-normal">({files.length})</span></span>
         {someSelected && (
           <button
             className="btn btn-danger"
@@ -200,6 +197,7 @@ function ReportList({ onSelect }: { onSelect: (name: string) => void }) {
                   <button
                     className="w-6 h-6 flex items-center justify-center rounded hover:bg-err-subtle hover:text-err text-fg-3 transition-colors"
                     title="Delete"
+                    aria-label={`Delete report ${f.name}`}
                     onClick={e => deleteSingle(f.name, e)}
                   >
                     <i className="fa-solid fa-trash-can text-[11px]" />
@@ -582,6 +580,9 @@ export function App() {
     didInitializeAgents.current = true
 
     void (async () => {
+      // Show the stored list at once; the live probe below can take seconds per offline agent.
+      const stored = await api<Agent[]>('/api/agents')
+      if (stored) setAgents(stored)
       await refreshAgents()
       await discoverAgents({ silent: true })
     })()
@@ -663,8 +664,8 @@ export function App() {
         <main className="flex-1 overflow-y-auto p-4 space-y-4">
           <KPIBar agents={agents} testState={testState} latest={latestMetrics} />
 
-          {activeTab === 'test' && (
-            <>
+          {/* Kept mounted while hidden so the test setup, live chart and log survive a tab switch. */}
+          <div className={activeTab === 'test' ? 'space-y-4' : 'hidden'}>
               <TestConfigPanel
                 agents={agentsMap}
                 testState={testState}
@@ -690,8 +691,7 @@ export function App() {
                 metricsHistory={metricsHistory}
               />
               <LogPanel logs={logs} onClear={clearLogs} />
-            </>
-          )}
+          </div>
 
           {activeTab === 'reports' && (
             selectedReport
