@@ -157,7 +157,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "$repo='IT-BAER/iperf-man
 - Save the generated token and re-add the agent through the dashboard's manual Add Agent form with that API key so the dashboard server can refresh and control the protected agent.
 - Set an agent token with `--token` or `-Token` explicitly if you need a deterministic value for automation.
 - The web dashboard now enables built-in session authentication by default. Set `DASHBOARD_AUTH_USERNAME` plus either `DASHBOARD_AUTH_PASSWORD_HASH` or `DASHBOARD_AUTH_PASSWORD` to control the credentials, or set `DASHBOARD_AUTH_DISABLE=1` to opt out explicitly.
-- Agent and dashboard control traffic is plain HTTP by default. Use TLS termination if the traffic can cross untrusted networks.
+- Agents serve HTTPS on their API port with a self-signed certificate (`agent.crt` and `agent.key` next to `config.json`), created with the `openssl` CLI on first start. The Linux installer installs `openssl` when it is missing; on Windows the agent uses `openssl.exe` from `PATH` or from Git for Windows. Without `openssl` the agent logs a warning and serves plain HTTP only.
+- The same port still answers plain HTTP, so older dashboards keep working. The dashboard switches an agent to `https://` as soon as the agent reports TLS, never switches back, and pins the certificate SHA-256 fingerprint on first contact (trust on first use). Compare the pinned fingerprint (tooltip on the agent URL) with the `TLS SHA-256` line of the installer output.
+- When an agent certificate changes (reinstall into an empty config directory, deleted `agent.crt`), the dashboard marks the agent offline with "certificate fingerprint changed" until you review and trust the new fingerprint.
+- API keys that were used over plain HTTP before the switch may have been captured. Set new tokens after all agents and the dashboard use HTTPS.
+- iperf3 test traffic itself is not encrypted; this is an iperf3 limit.
+- Set `"tls": false` in the agent config to disable HTTPS.
 
 ## Manual Agent Installation
 
@@ -238,7 +243,8 @@ Linux:
 ```bash
 sudo systemctl status iperf-agent
 journalctl -u iperf-agent -f
-curl -s http://127.0.0.1:9001/status
+curl -sk https://127.0.0.1:9001/status -H "X-API-Key: $TOKEN"
+openssl x509 -in /etc/iperf-manager/iperf3-agent/agent.crt -noout -fingerprint -sha256
 ```
 
 Windows:

@@ -388,6 +388,17 @@ export function App() {
     }
   }, [toast])
 
+  const trustAgentCertificate = useCallback(async (id: string, fingerprint: string) => {
+    const data = await api<Agent>(`/api/agents/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ trust_fingerprint: fingerprint }),
+    })
+    if (data) {
+      setAgents(prev => prev.map(a => (a.id === data.id ? data : a)))
+      toast(`Trusted new certificate for "${data.name}"`, data.status === 'online' ? 'ok' : 'info')
+    }
+  }, [toast])
+
   const removeAgent = useCallback(async (id: string) => {
     await api(`/api/agents/${id}`, { method: 'DELETE' })
     setAgents(prev => prev.filter(a => a.id !== id))
@@ -655,6 +666,7 @@ export function App() {
           onRefresh={refreshAgents}
           onAdd={addAgent}
           onUpdateAgentKey={updateAgentKey}
+          onTrustCertificate={trustAgentCertificate}
           onRemove={removeAgent}
           onDiscover={discoverAgents}
           isDiscovering={isDiscovering}

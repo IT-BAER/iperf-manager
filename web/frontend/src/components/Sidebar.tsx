@@ -7,6 +7,7 @@ interface Props {
   onRefresh: () => void
   onAdd: (url: string, name: string, apiKey: string) => void
   onUpdateAgentKey: (id: string, apiKey: string) => void
+  onTrustCertificate: (id: string, fingerprint: string) => void
   onRemove: (id: string) => void
   onDiscover: () => void
   isDiscovering?: boolean
@@ -27,7 +28,7 @@ function RefreshIcon() {
   return <i className="fa-solid fa-rotate-right text-[11px] shrink-0" aria-hidden="true" />
 }
 
-export function Sidebar({ open, agents, onRefresh, onAdd, onUpdateAgentKey, onRemove, onDiscover, isDiscovering, isRefreshing }: Props) {
+export function Sidebar({ open, agents, onRefresh, onAdd, onUpdateAgentKey, onTrustCertificate, onRemove, onDiscover, isDiscovering, isRefreshing }: Props) {
   const [addUrl, setAddUrl] = useState('')
   const [addName, setAddName] = useState('')
   const [addApiKey, setAddApiKey] = useState('')
@@ -46,6 +47,17 @@ export function Sidebar({ open, agents, onRefresh, onAdd, onUpdateAgentKey, onRe
     const entered = window.prompt(`Set API key for ${agent.name} (leave empty to clear):`, '')
     if (entered === null) return
     onUpdateAgentKey(agent.id, entered.trim())
+  }
+
+  const handleTrust = (agent: Agent) => {
+    const next = agent.tls_new_fingerprint
+    if (!next) return
+    const ok = window.confirm(
+      `The certificate of "${agent.name}" changed.\n\nPinned:\n${agent.tls_fingerprint}\n\nNew:\n${next}\n\n`
+      + 'Trust the new certificate only if you regenerated or reinstalled this agent. '
+      + 'Compare the new fingerprint with the agent log or installer output.',
+    )
+    if (ok) onTrustCertificate(agent.id, next)
   }
 
   const online = agents.filter(a => a.status === 'online').length
@@ -103,7 +115,7 @@ export function Sidebar({ open, agents, onRefresh, onAdd, onUpdateAgentKey, onRe
               name="agentUrl"
               aria-label="Agent URL"
               autoComplete="url"
-              placeholder="http://host:9001"
+              placeholder="https://host:9001"
               value={addUrl}
               onChange={e => setAddUrl(e.target.value)}
             />
@@ -188,9 +200,25 @@ export function Sidebar({ open, agents, onRefresh, onAdd, onUpdateAgentKey, onRe
                     </button>
                   </div>
                 </div>
-                <div className="text-xs text-fg-3 mt-0.5 ml-3.5 truncate font-mono">
+                <div
+                  className="text-xs text-fg-3 mt-0.5 ml-3.5 truncate font-mono"
+                  title={agent.tls_fingerprint ? `TLS certificate SHA-256 ${agent.tls_fingerprint}` : undefined}
+                >
+                  {agent.url.startsWith('https://')
+                    ? <i className="fa-solid fa-lock text-[9px] mr-1" aria-label="TLS" />
+                    : <i className="fa-solid fa-lock-open text-[9px] mr-1 text-warn" aria-label="No TLS" />}
                   {agent.url}
                 </div>
+                {agent.tls_error && (
+                  <div className="text-xs text-err mt-1 ml-3.5 flex items-center gap-2">
+                    <span className="truncate">TLS: {agent.tls_error}</span>
+                    {agent.tls_new_fingerprint && (
+                      <button onClick={() => handleTrust(agent)} className="underline hover:text-accent shrink-0">
+                        Review
+                      </button>
+                    )}
+                  </div>
+                )}
               </li>
             ))}
           </ul>

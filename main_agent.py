@@ -18,7 +18,7 @@ def main():
     parser.add_argument('--port', type=int, default=None, help='REST API port (overrides config)')
     args = parser.parse_args()
 
-    from core.agent_service import AgentService, load_agent_cfg
+    from core.agent_service import CFG_DIR, AgentService, load_agent_cfg
 
     cfg = load_agent_cfg()
     try:
@@ -33,6 +33,7 @@ def main():
         autostart_ports=ports,
         advertise_ip=cfg.get('advertise_ip', ''),
         api_token=cfg.get('api_token', ''),
+        tls_dir=None if cfg.get('tls', True) is False else str(CFG_DIR),
     )
     service.start()
     print(f'[Agent] Running at {service.base_url()}')

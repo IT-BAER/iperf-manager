@@ -5,6 +5,9 @@ export interface Agent {
   status: 'online' | 'offline' | 'unknown'
   last_seen: number | null
   details: Record<string, unknown>
+  tls_fingerprint?: string
+  tls_error?: string
+  tls_new_fingerprint?: string
 }
 
 export interface TestState {

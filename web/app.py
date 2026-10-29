@@ -31,7 +31,9 @@ except ImportError:
     raise SystemExit("flask-socketio is required. Install with: pip install -r requirements.txt")
 
 # ── Core imports (read-only, no modifications) ──────────────────────────
-from core.net_utils import http_get_json, http_post_json, poll_metrics
+from core.net_utils import (
+    http_get_json, http_post_json, poll_metrics, set_tls_pin, observed_tls_fingerprint,
+)
 from core.test_runner import run_test
 from core.constants import (
     DISCOVER_PORT, DEFAULT_API_PORT, DEFAULT_BASE_PORT,
@@ -137,6 +139,7 @@ _LOGIN_FAILURES: dict[str, list[float]] = {}
 # ── In-memory state ─────────────────────────────────────────────────────
 _agents: dict[str, dict] = {}          # {agent_id: {url, name, status, last_seen}}
 _agents_lock = threading.Lock()
+_agents_save_lock = threading.Lock()
 
 _test_state: dict = {"status": "idle"}  # idle | running | stopping
 _test_lock = threading.Lock()
@@ -268,28 +271,32 @@ def _save_agents_state():
     with _agents_lock:
         snapshot = [
             {
+                "id": info.get("id", ""),
                 "url": info.get("url", ""),
                 "name": info.get("name", ""),
                 "api_key": info.get("api_key", ""),
+                "tls_fingerprint": info.get("tls_fingerprint", ""),
             }
             for info in _agents.values()
             if info.get("url")
         ]
 
     tmp_path = AGENTS_STATE_FILE.with_suffix(".json.tmp")
-    try:
-        tmp_path.write_text(json.dumps(snapshot, indent=2), encoding="utf-8")
+    # Parallel refreshes can save at the same time; they share one tmp file.
+    with _agents_save_lock:
         try:
-            tmp_path.chmod(0o600)
-        except OSError:
+            tmp_path.write_text(json.dumps(snapshot, indent=2), encoding="utf-8")
+            try:
+                tmp_path.chmod(0o600)
+            except OSError:
+                pass
+            tmp_path.replace(AGENTS_STATE_FILE)
+            try:
+                AGENTS_STATE_FILE.chmod(0o600)
+            except OSError:
+                pass
+        except Exception:
             pass
-        tmp_path.replace(AGENTS_STATE_FILE)
-        try:
-            AGENTS_STATE_FILE.chmod(0o600)
-        except OSError:
-            pass
-    except Exception:
-        pass
 
 
 def _load_agents_state():
@@ -309,7 +316,10 @@ def _load_agents_state():
             url = _normalize_agent_url(str(item.get("url", "")))
         except ValueError:
             continue
-        aid = _agent_id(url)
+        # The stored ID survives an http -> https upgrade; profiles reference agents by ID.
+        aid = str(item.get("id", "") or "").strip() or _agent_id(url)
+        fingerprint = str(item.get("tls_fingerprint", "") or "").strip()
+        set_tls_pin(url, fingerprint)
         restored[aid] = {
             "id": aid,
             "url": url,
@@ -317,11 +327,29 @@ def _load_agents_state():
             "status": "unknown",
             "last_seen": None,
             "api_key": str(item.get("api_key", "") or "").strip(),
+            "tls_fingerprint": fingerprint,
             "details": {},
         }
 
     with _agents_lock:
         _agents.update(restored)
+
+
+def _find_agent_by_endpoint(url: str) -> dict:
+    """Return the stored agent with the same host and port as url, ignoring the scheme."""
+    target = urlparse(url)
+    with _agents_lock:
+        for info in _agents.values():
+            stored = urlparse(info.get("url", ""))
+            if (stored.hostname, stored.port) == (target.hostname, target.port):
+                return dict(info)
+    return {}
+
+
+def _merge_agent_url(url: str, existing: dict) -> str:
+    """Never downgrade a stored https:// agent to http:// (discovery replies are unauthenticated)."""
+    stored = str(existing.get("url", "") or "")
+    return stored if stored.startswith("https://") else url
 
 
 def _public_agent(info: dict) -> dict:
@@ -757,9 +785,35 @@ def _check_agent(url: str, api_key: str = "") -> dict | None:
 
 
 def _refresh_agent(aid: str, info: dict) -> dict:
-    """Probe an agent and update its stored status."""
-    st = _check_agent(info["url"], info.get("api_key", ""))
+    """Probe an agent, pin its TLS certificate on first use, and update its stored status."""
+    url = info["url"]
+    api_key = info.get("api_key", "")
+    pin = str(info.get("tls_fingerprint", "") or "")
+    set_tls_pin(url, pin)
+    st = _check_agent(url, api_key)
+    if st and url.startswith("http://") and (st.get("tls") or {}).get("enabled"):
+        # The agent offers TLS: switch to https once and never back.
+        https_url = "https://" + url[len("http://"):]
+        st_tls = _check_agent(https_url, api_key)
+        if st_tls:
+            url, st = https_url, st_tls
+
+    tls_error = new_fingerprint = ""
+    if url.startswith("https://"):
+        seen = observed_tls_fingerprint(url) or ""
+        if st and not pin and seen:
+            pin = seen
+            set_tls_pin(url, pin)
+        elif not st and pin and seen and seen != pin:
+            tls_error = "certificate fingerprint changed"
+            new_fingerprint = seen
+
+    changed = (url, pin) != (info["url"], str(info.get("tls_fingerprint", "") or ""))
     with _agents_lock:
+        info["url"] = url
+        info["tls_fingerprint"] = pin
+        info["tls_error"] = tls_error
+        info["tls_new_fingerprint"] = new_fingerprint
         if st:
             info["status"] = "online"
             info["last_seen"] = time.time()
@@ -768,6 +822,8 @@ def _refresh_agent(aid: str, info: dict) -> dict:
             info["status"] = "offline"
             info["details"] = {}
         _agents[aid] = info
+    if changed:
+        _save_agents_state()
     return info
 
 
@@ -1234,13 +1290,14 @@ def add_agent():
         url = _normalize_agent_url(data.get("url", ""))
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
-    aid = _agent_id(url)
-    with _agents_lock:
-        existing = dict(_agents.get(aid, {}))
+    existing = _find_agent_by_endpoint(url)
+    aid = existing.get("id") or _agent_id(url)
+    url = _merge_agent_url(url, existing)
     name = data.get("name", "").strip() or existing.get("name") or url
     api_key = str(data.get("api_key", "") or existing.get("api_key", "")).strip()
     info = {"id": aid, "url": url, "name": name, "status": "unknown",
-            "last_seen": existing.get("last_seen"), "api_key": api_key, "details": existing.get("details", {})}
+            "last_seen": existing.get("last_seen"), "api_key": api_key,
+            "tls_fingerprint": existing.get("tls_fingerprint", ""), "details": existing.get("details", {})}
     _refresh_agent(aid, info)
     _save_agents_state()
     return jsonify(_public_agent(info)), 201
@@ -1263,6 +1320,10 @@ def update_agent(agent_id):
     api_key = existing_key
     if "api_key" in data:
         api_key = str(data.get("api_key", "") or "").strip()
+    fingerprint = str(existing.get("tls_fingerprint", "") or "")
+    if "trust_fingerprint" in data:
+        # The user confirmed the fingerprint shown after a certificate change.
+        fingerprint = str(data.get("trust_fingerprint", "") or "").strip()
 
     info = {
         "id": existing.get("id", agent_id),
@@ -1271,6 +1332,7 @@ def update_agent(agent_id):
         "status": existing.get("status", "unknown"),
         "last_seen": existing.get("last_seen"),
         "api_key": api_key,
+        "tls_fingerprint": fingerprint,
         "details": existing.get("details", {}),
     }
     _refresh_agent(agent_id, info)
@@ -1299,12 +1361,13 @@ def discover_agents():
             url = _normalize_agent_url(f["url"])
         except ValueError:
             continue
-        aid = _agent_id(url)
-        with _agents_lock:
-            existing = dict(_agents.get(aid, {}))
+        existing = _find_agent_by_endpoint(url)
+        aid = existing.get("id") or _agent_id(url)
+        url = _merge_agent_url(url, existing)
         info = {"id": aid, "url": url, "name": existing.get("name") or f.get("name", url),
                 "status": "online", "last_seen": time.time(),
                 "api_key": str(existing.get("api_key", "") or ""),
+                "tls_fingerprint": str(existing.get("tls_fingerprint", "") or ""),
                 "details": {"version": f.get("version"), "ips": f.get("ips"), "interfaces": f.get("interfaces")}}
         with _agents_lock:
             _agents[aid] = info

@@ -707,6 +707,16 @@ if ($taskState -eq "Running") {
     Write-Warn "Task state: $taskState (may take a moment to start)"
 }
 
+# The agent writes its HTTPS certificate on first start (openssl from PATH or Git for Windows).
+$certFile = Join-Path $ConfigDir "agent.crt"
+for ($i = 0; $i -lt 15 -and -not (Test-Path $certFile); $i++) { Start-Sleep -Seconds 1 }
+$tlsFingerprint = $null
+if (Test-Path $certFile) {
+    $pemBody = (Get-Content -Raw -LiteralPath $certFile) -replace '-----[^-]+-----', '' -replace '\s', ''
+    $certHash = [System.Security.Cryptography.SHA256]::Create().ComputeHash([Convert]::FromBase64String($pemBody))
+    $tlsFingerprint = ($certHash | ForEach-Object { $_.ToString('X2') }) -join ':'
+}
+
 # ── 8. Summary ───────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "========================================================" -ForegroundColor Green
@@ -727,7 +737,14 @@ if ($TokenGenerated) {
 } else {
     Write-Host "  API token         : (provided)" -ForegroundColor Cyan
 }
+if ($tlsFingerprint) {
+    Write-Host "  TLS SHA-256       : $tlsFingerprint" -ForegroundColor Cyan
+}
 Write-Host ""
+if (-not $tlsFingerprint) {
+    Write-Warn "No TLS certificate at ${certFile}: the agent serves plain HTTP only. Install Git for Windows (it ships openssl.exe) or add openssl to PATH, then restart the task."
+    Write-Host ""
+}
 if ($TokenGenerated) {
     Write-Warn "Save this token now. Use it when manually adding the agent in the dashboard so the server can refresh and control the agent securely."
     Write-Host ""
