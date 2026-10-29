@@ -8,6 +8,7 @@ and this project adheres to Semantic Versioning.
 ## [Unreleased]
 
 ### Fixed
+- The dashboard live chart no longer freezes mid-test: the metrics poller kept running only until the first zero-throughput poll (a 0 Mbit/s interval or an agent that missed two polls) and then stopped for the rest of the test.
 - Agents now record the real iperf3 client exit code; before, a client whose output closed before the process was reaped kept `exit_code: null` in `/status`, `/metrics` and the client log.
 
 ## [1.1.0] - 2026-03-25

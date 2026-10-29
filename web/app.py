@@ -1039,17 +1039,17 @@ def _metrics_poller(config: dict, stop_ev: threading.Event):
             except Exception:
                 metrics[name] = {"up": 0, "dn": 0, "jitter": None, "loss": None}
 
-        # Only emit meaningful data; stop once data drops to zero after being active
+        # Skip the zero lead-in before iperf3 reports; afterwards a zero is a real drop, so keep emitting
+        # until _run_test_thread sets stop_ev.
         if total_up > 0 or total_dn > 0:
             was_active = True
+        if was_active:
             socketio.emit("metrics", {
                 "timestamp": time.time(),
                 "clients": metrics,
                 "total_up": round(total_up, 3),
                 "total_dn": round(total_dn, 3),
             })
-        elif was_active:
-            break
 
         stop_ev.wait(poll_interval)
 
