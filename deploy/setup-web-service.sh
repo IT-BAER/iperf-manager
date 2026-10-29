@@ -164,6 +164,19 @@ Environment=SESSION_COOKIE_SECURE=${COOKIE_SECURE}
 SVCEOF
 fi
 
+# Pass through other settings from web.env (e.g. DASHBOARD_DISCOVERY_*); keys managed above stay authoritative.
+if [[ -f "$STATE_ENV_FILE" ]]; then
+	while IFS= read -r env_line || [[ -n "$env_line" ]]; do
+		env_line=${env_line%$'\r'}
+		env_name=${env_line%%=*}
+		[[ "$env_line" == *=* && "$env_name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+		case "$env_name" in
+			FLASK_SECRET|DASHBOARD_AUTH_*|SESSION_COOKIE_SECURE|IPERF_MANAGER_STATE_DIR) continue ;;
+		esac
+		echo "Environment=\"${env_line}\"" >> "$SERVICE_FILE"
+	done < "$STATE_ENV_FILE"
+fi
+
 cat >> "$SERVICE_FILE" <<SVCEOF
 
 [Install]

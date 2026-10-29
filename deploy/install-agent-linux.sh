@@ -12,6 +12,7 @@ API_PORT=9001
 IPERF_PORTS="5211,5212"
 INSTALL_DIR="/opt/iperf-manager"
 CONFIG_DIR="/etc/iperf-manager"
+CONFIG_FILE="${CONFIG_DIR}/iperf3-agent/config.json"
 LOG_DIR="/var/log/iperf-manager"
 SERVICE_NAME="iperf-agent"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
@@ -190,6 +191,11 @@ if [[ -z "$PYTHON_BIN" ]]; then
 fi
 ok "Python found: $PYTHON_BIN ($PY_VER)"
 
+if [[ -z "$API_TOKEN" && -f "$CONFIG_FILE" ]]; then
+    # Reruns (--update) keep the existing token; a new one would break every key stored in the dashboard.
+    API_TOKEN=$($PYTHON_BIN -c 'import json, sys; print(json.load(open(sys.argv[1])).get("api_token", ""))' "$CONFIG_FILE" 2>/dev/null || true)
+    [[ -n "$API_TOKEN" ]] && ok "Keeping existing API token from ${CONFIG_FILE}"
+fi
 if [[ -z "$API_TOKEN" ]]; then
     API_TOKEN=$($PYTHON_BIN -c 'import secrets; print(secrets.token_hex(32))')
     TOKEN_GENERATED=true
@@ -249,7 +255,6 @@ mkdir -p "${INSTALL_DIR}/data"
 # The agent reads config from $LOCALAPPDATA/iperf3-agent/config.json
 # We set LOCALAPPDATA=/etc/iperf-manager in the service unit so the
 # config resolves to /etc/iperf-manager/iperf3-agent/config.json
-CONFIG_FILE="${CONFIG_DIR}/iperf3-agent/config.json"
 
 cat > "$CONFIG_FILE" <<CFGEOF
 {
