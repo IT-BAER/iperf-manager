@@ -7,6 +7,10 @@ and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+- No changes yet.
+
+## [1.2.0] - 2026-10-29
+
 ### Changed
 - Default test base port is now `5211` in the dashboard, the backend fallback and the README, matching the agents' iperf3 autostart ports (`5211,5212`) and `/api/meta`. Saved profiles keep their stored port.
 
@@ -24,6 +28,14 @@ and this project adheres to Semantic Versioning.
 - A schedule can be added while a test is running.
 - `data/profiles/*.json` is gitignored.
 - Agents now record the real iperf3 client exit code; before, a client whose output closed before the process was reaped kept `exit_code: null` in `/status`, `/metrics` and the client log.
+
+### Security
+- Refreshed the frontend lockfile; clears all open Dependabot advisories (vite, postcss, js-yaml, ws, socket.io-parser, brace-expansion, picomatch and others).
+
+### Known issues
+- Agents can be assigned to a test only by drag and drop; there is no click or keyboard path yet.
+- The report duration counts sampled rows, so a test runs a few seconds shorter than shown (an 8 s test shows 11 s).
+- The poll interval field accepts 0.1 s, but the live chart polls at most every 0.5 s.
 
 ## [1.1.0] - 2026-03-25
 
