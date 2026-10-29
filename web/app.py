@@ -989,7 +989,7 @@ def _normalize_config(raw: dict) -> dict:
         },
         "clients": clients,
         "duration_sec": raw.get("duration_sec", 10),
-        "base_port": raw.get("base_port", 5201),
+        "base_port": raw.get("base_port", DEFAULT_BASE_PORT),
         "poll_interval_sec": raw.get("poll_interval_sec", 1),
         "mode": mode,
         "api_key": raw.get("api_key", ""),

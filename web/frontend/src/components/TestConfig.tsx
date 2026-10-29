@@ -13,7 +13,7 @@ const DEFAULT_CONFIG: TestConfig = {
   server_bind: '',
   api_key: '',
   duration_sec: 10,
-  base_port: 5201,
+  base_port: 5211,
   poll_interval_sec: 1,
   protocol: 'tcp',
   parallel: 1,
@@ -261,7 +261,7 @@ export default function TestConfigPanel({
                 type="number" min={1024} max={65534}
                 className="input-base"
                 value={config.base_port}
-                onChange={e => update('base_port', parseInt(e.target.value) || 5201)}
+                onChange={e => update('base_port', parseInt(e.target.value) || DEFAULT_CONFIG.base_port)}
                 disabled={isRunning}
               />
             </div>

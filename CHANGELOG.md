@@ -7,6 +7,9 @@ and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+- Default test base port is now `5211` in the dashboard, the backend fallback and the README, matching the agents' iperf3 autostart ports (`5211,5212`) and `/api/meta`. Saved profiles keep their stored port.
+
 ### Fixed
 - Profile dropdown: shows "No saved profiles" instead of an empty strip, widens for long names and truncates them with a tooltip, keeps a fixed width in the header, shows the placeholder muted, and offers "No profile" to clear the selection.
 - Switching to Reports and back no longer resets the test setup, live chart and log.
