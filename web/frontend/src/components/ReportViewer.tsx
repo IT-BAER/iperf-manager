@@ -13,6 +13,7 @@ import {
 import { Line } from 'react-chartjs-2'
 import type { ChartData, ChartOptions } from 'chart.js'
 import { api } from '../api'
+import { formatMbps as fmtMbps } from '../format'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler)
 
@@ -28,10 +29,6 @@ function parseMbps(val: string): number {
   return isNaN(n) ? 0 : n
 }
 
-function fmtMbps(mbps: number): string {
-  if (mbps >= 1000) return `${(mbps / 1000).toFixed(2)} Gbps`
-  return `${mbps.toFixed(1)} Mbps`
-}
 
 const MONO_COLS = new Set(['ts', 'on_up', 'on_dn', 'total_up', 'total_dn', 'wall'])
 

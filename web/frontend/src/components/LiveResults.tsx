@@ -14,6 +14,7 @@ import {
 import { Line, Bar } from 'react-chartjs-2'
 import type { ChartOptions, ChartData } from 'chart.js'
 import type { TestState, Metrics } from '../types'
+import { formatMbps as formatBps } from '../format'
 
 ChartJS.register(
   CategoryScale, LinearScale, PointElement, LineElement,
@@ -26,13 +27,6 @@ interface LiveResultsProps {
   testState: TestState
   metrics: Metrics | null
   metricsHistory: MetricPoint[]
-}
-
-function formatBps(mbps: number): string {
-  if (mbps >= 1000) return `${(mbps / 1000).toFixed(2)} Gbps`
-  if (mbps >= 1) return `${mbps.toFixed(1)} Mbps`
-  if (mbps >= 0.001) return `${(mbps * 1000).toFixed(0)} Kbps`
-  return `${mbps.toFixed(0)} Mbps`
 }
 
 function formatElapsed(ms: number): string {
@@ -185,7 +179,7 @@ export default function LiveResults({ testState, metrics, metricsHistory }: Live
       {
         label: 'Download',
         data: agentIds.map(id => metrics?.clients[id]?.dn ?? 0),
-        backgroundColor: 'rgba(47,129,247,0.72)',
+        backgroundColor: 'rgba(88,166,255,0.72)',
         borderColor: CHART_COLORS.accent,
         borderWidth: 1,
       },
@@ -203,7 +197,7 @@ export default function LiveResults({ testState, metrics, metricsHistory }: Live
       >
         <div className="flex items-center gap-3">
           <span className="text-[13px] font-semibold text-fg">Live Results</span>
-          <span className={`w-2 h-2 rounded-full ${testState.status === 'running' ? 'bg-ok' : 'bg-warn'}`} />
+          <span className={`w-2 h-2 rounded-full ${testState.status === 'running' ? 'bg-ok' : testState.status === 'stopping' ? 'bg-warn' : 'bg-fg-4'}`} />
           <span className="text-[12px] text-fg-3 capitalize">{testState.status}</span>
         </div>
         <i className={`fa-solid fa-chevron-down text-fg-3 text-[11px] transition-transform duration-150 ${open ? '' : '-rotate-90'}`} />

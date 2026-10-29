@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Profile, ScheduledTest, ScheduleSource, TestConfig } from '../types'
+import { SelectInput } from './SelectInput'
 
 interface CreateSchedulePayload {
   name: string
@@ -47,10 +48,12 @@ export default function SchedulePanel({
   const [creating, setCreating] = useState(false)
 
   useEffect(() => {
-    if (!profileName && activeProfile) {
+    if (!profileName && activeProfile && profiles.some(p => p.name === activeProfile)) {
       setProfileName(activeProfile)
+    } else if (profileName && !profiles.some(p => p.name === profileName)) {
+      setProfileName('')
     }
-  }, [activeProfile, profileName])
+  }, [activeProfile, profileName, profiles])
 
   const hasProfiles = profiles.length > 0
   const canCreate = useMemo(() => {
@@ -93,9 +96,7 @@ export default function SchedulePanel({
           <span className="text-[13px] font-semibold text-fg">Scheduled Tests</span>
           <span className="text-[12px] text-fg-3">{schedules.length} configured</span>
         </div>
-        <span className={`text-fg-3 text-lg leading-none transition-transform duration-150 ${open ? '' : '-rotate-90'}`}>
-          ▾
-        </span>
+        <i className={`fa-solid fa-chevron-down text-fg-3 text-[11px] transition-transform duration-150 ${open ? '' : '-rotate-90'}`} />
       </div>
 
       <div className={`collapsible-grid ${open ? 'open' : 'closed'}`}>
@@ -103,8 +104,9 @@ export default function SchedulePanel({
           <div className="p-4 space-y-4">
             <div className="grid grid-cols-[1.3fr_1fr_1fr_1fr_auto] gap-3 items-end">
               <div>
-                <label className="block text-[12px] font-medium text-fg-2 mb-1">Schedule Name</label>
+                <label htmlFor="schedule-name" className="block text-[12px] font-medium text-fg-2 mb-1">Schedule Name</label>
                 <input
+                  id="schedule-name"
                   className="input-base"
                   placeholder="e.g. Nightly uplink test"
                   value={name}
@@ -112,41 +114,45 @@ export default function SchedulePanel({
                 />
               </div>
               <div>
-                <label className="block text-[12px] font-medium text-fg-2 mb-1">Cron</label>
+                <label htmlFor="schedule-cron" className="block text-[12px] font-medium text-fg-2 mb-1">Cron</label>
                 <input
-                  className="input-base"
+                  id="schedule-cron"
+                  className="input-base font-mono"
                   placeholder="*/30 * * * *"
                   value={cron}
                   onChange={e => setCron(e.target.value)}
                 />
               </div>
               <div>
-                <label className="block text-[12px] font-medium text-fg-2 mb-1">Source</label>
-                <select
-                  className="input-base"
+                <label htmlFor="schedule-source" className="block text-[12px] font-medium text-fg-2 mb-1">Source</label>
+                <SelectInput
+                  id="schedule-source"
+                  fullWidth
+                  className="h-8"
                   value={source}
-                  onChange={e => setSource((e.target.value as ScheduleSource) || 'profile')}
-                >
-                  <option value="profile">Profile</option>
-                  <option value="manual">Manual Snapshot</option>
-                </select>
+                  onChange={v => setSource((v as ScheduleSource) || 'profile')}
+                  options={[
+                    { value: 'profile', label: 'Profile' },
+                    { value: 'manual', label: 'Manual Snapshot' },
+                  ]}
+                />
               </div>
               <div>
-                <label className="block text-[12px] font-medium text-fg-2 mb-1">
+                <label htmlFor="schedule-profile" className="block text-[12px] font-medium text-fg-2 mb-1">
                   {source === 'profile' ? 'Profile' : 'Manual Config'}
                 </label>
                 {source === 'profile' ? (
-                  <select
-                    className="input-base"
+                  <SelectInput
+                    id="schedule-profile"
+                    fullWidth
+                    className="h-8"
                     value={profileName}
-                    onChange={e => setProfileName(e.target.value)}
+                    onChange={setProfileName}
                     disabled={!hasProfiles}
-                  >
-                    <option value="">Select profile...</option>
-                    {profiles.map(profile => (
-                      <option key={profile.name} value={profile.name}>{profile.name}</option>
-                    ))}
-                  </select>
+                    placeholder={hasProfiles ? 'Select profile…' : 'No saved profiles'}
+                    emptyLabel="No saved profiles"
+                    options={profiles.map(profile => ({ value: profile.name, label: profile.name }))}
+                  />
                 ) : (
                   <div className="h-8 px-3 rounded-sm border border-line bg-bg text-[12px] text-fg-2 flex items-center">
                     {draftConfig ? 'Using current Test Configuration' : 'No draft config available'}
@@ -156,7 +162,7 @@ export default function SchedulePanel({
               <button
                 type="button"
                 className="btn btn-primary h-8"
-                disabled={!canCreate || creating || isRunning}
+                disabled={!canCreate || creating}
                 onClick={submit}
               >
                 {creating ? 'Adding…' : 'Add Schedule'}

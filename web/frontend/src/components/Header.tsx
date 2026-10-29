@@ -115,9 +115,13 @@ export function Header({
         <SelectInput
           value={activeProfile}
           onChange={onProfileChange}
-          options={[...profiles.map(p => ({ value: p.name, label: p.name }))]}
-          placeholder="Profile..."
-          className="h-7 min-w-[130px] max-w-[220px] text-[12px]"
+          options={[
+            ...(activeProfile ? [{ value: '', label: 'No profile' }] : []),
+            ...profiles.map(p => ({ value: p.name, label: p.name })),
+          ]}
+          placeholder="Profile…"
+          emptyLabel="No saved profiles"
+          className="h-7 w-[200px] text-[12px]"
           aria-label="Select profile"
         />
 

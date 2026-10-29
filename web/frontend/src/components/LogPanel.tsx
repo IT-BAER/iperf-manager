@@ -37,7 +37,7 @@ export function LogPanel({ logs, onClear }: Props) {
         onClick={() => setOpen(o => !o)}
       >
         <div className="flex items-center gap-2.5">
-          <h3 className="text-sm font-semibold">Log</h3>
+          <span className="text-[13px] font-semibold text-fg">Log</span>
           {logs.length > 0 && (
             <span className="text-[11px] font-mono text-fg-4">{logs.length}</span>
           )}

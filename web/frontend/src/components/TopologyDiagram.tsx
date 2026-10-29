@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import type { Agent, TestConfig, ClientRow, Metrics } from '../types'
 import { SelectInput } from './SelectInput'
+import { formatMbps as fmtSpeed } from '../format'
 
 interface NI { iface: string; ip: string }
 
@@ -45,14 +46,6 @@ function useDropZone(onDrop: (agentId: string) => void, disabled: boolean) {
     if (id) onDrop(id)
   }
   return { over, onDragOver, onDragLeave, onDrop: handleDrop }
-}
-
-/** Format Mbps to human-readable string */
-function fmtSpeed(mbps: number): string {
-  if (mbps >= 1000) return `${(mbps / 1000).toFixed(1)} Gbps`
-  if (mbps >= 1) return `${mbps.toFixed(1)} Mbps`
-  if (mbps > 0) return `${(mbps * 1000).toFixed(0)} Kbps`
-  return '0'
 }
 
 function metricClientKey(row: ClientRow): string {

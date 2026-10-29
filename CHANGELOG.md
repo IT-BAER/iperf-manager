@@ -8,6 +8,15 @@ and this project adheres to Semantic Versioning.
 ## [Unreleased]
 
 ### Fixed
+- Profile dropdown: shows "No saved profiles" instead of an empty strip, widens for long names and truncates them with a tooltip, keeps a fixed width in the header, shows the placeholder muted, and offers "No profile" to clear the selection.
+- Switching to Reports and back no longer resets the test setup, live chart and log.
+- The agent list appears at once on page load; agent refresh probes all agents in parallel (68 s to 4 s with 17 unreachable agents).
+- Profiles saved with backend mode names (`bidir`, `up_only`, `down_only`) now select the matching mode button.
+- Duration is capped at 86400 s, the iperf3 maximum.
+- Consistent look: one chevron style on all collapsible panels, themed dropdowns in Scheduled Tests, one throughput format everywhere (`0 Mbps` instead of `0 Kbps`/`0`), Upload green and Download blue in the KPI bar, and a neutral status dot when idle.
+- Removing an agent and deleting reports now ask for confirmation, like profiles and schedules.
+- A schedule can be added while a test is running.
+- `data/profiles/*.json` is gitignored.
 - Agents now record the real iperf3 client exit code; before, a client whose output closed before the process was reaped kept `exit_code: null` in `/status`, `/metrics` and the client log.
 
 ## [1.1.0] - 2026-03-25

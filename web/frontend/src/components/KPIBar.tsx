@@ -1,15 +1,10 @@
 import type { Agent, TestState, Metrics } from '../types'
+import { formatMbps } from '../format'
 
 interface Props {
   agents: Agent[]
   testState: TestState
   latest: Metrics | null
-}
-
-function fmt(val: number): string {
-  if (val >= 1000) return (val / 1000).toFixed(1) + ' Gbps'
-  if (val >= 1) return val.toFixed(1) + ' Mbps'
-  return (val * 1000).toFixed(0) + ' Kbps'
 }
 
 export function KPIBar({ agents, testState, latest }: Props) {
@@ -28,12 +23,12 @@ export function KPIBar({ agents, testState, latest }: Props) {
     },
     {
       label: 'Upload',
-      value: latest ? fmt(latest.total_up) : '—',
-      color: 'text-accent',
+      value: latest ? formatMbps(latest.total_up) : '—',
+      color: 'text-ok',
     },
     {
       label: 'Download',
-      value: latest ? fmt(latest.total_dn) : '—',
+      value: latest ? formatMbps(latest.total_dn) : '—',
       color: 'text-accent',
     },
   ]
