@@ -7,6 +7,9 @@ and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+- The Windows installer left explicit permissions on items inside the install folder, for example `BUILTIN\Users` read and create rights on a tree copied together with its ACLs. It now resets every item that has explicit entries, so the whole folder is SYSTEM and Administrators only.
+
 ## [1.3.0] - 2026-10-30
 
 ### Added

@@ -264,7 +264,9 @@ function Reset-ForeignItems {
             continue
         }
         $foreign = Set-AdminOwner -Path $child.FullName
-        if ($foreign -or (Get-Acl -LiteralPath $child.FullName).AreAccessRulesProtected) {
+        # Explicit entries survive the new root ACL, e.g. on a tree copied together with its ACLs.
+        $acl = Get-Acl -LiteralPath $child.FullName
+        if ($foreign -or $acl.AreAccessRulesProtected -or @($acl.Access | Where-Object { -not $_.IsInherited }).Count) {
             & icacls.exe $child.FullName /reset /Q | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "icacls /reset failed on $($child.FullName) (exit code $LASTEXITCODE)" }
         }
