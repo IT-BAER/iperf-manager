@@ -26,6 +26,7 @@ function Write-Log { param([string]$Msg) Add-Content -LiteralPath $LogFile -Valu
 
 $script:Installed = ""
 $script:Target = ""
+$script:BackedUp = $false
 $script:Started = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 
 function Write-State {
@@ -36,6 +37,50 @@ function Write-State {
     $tmp = "$StateFile.tmp"
     [System.IO.File]::WriteAllText($tmp, ($data | ConvertTo-Json -Compress), (New-Object System.Text.UTF8Encoding($false)))
     Move-Item -LiteralPath $tmp -Destination $StateFile -Force
+}
+
+$RollbackDir = Join-Path $WorkDir "rollback"
+
+function Remove-Tree {
+    param([string]$Path)
+    # rmdir does not follow junctions; Remove-Item -Recurse in Windows PowerShell does.
+    # "Continue": Windows PowerShell turns redirected native stderr into terminating errors under "Stop".
+    $ErrorActionPreference = "Continue"
+    & cmd.exe /c rmdir /s /q "$Path" 2>$null
+}
+
+function Invoke-Mirror {
+    param([string]$From, [string]$To)
+    $ErrorActionPreference = "Continue"
+    # /XJ: never follow junctions. Robocopy exit codes 0-7 mean success.
+    & robocopy.exe $From $To /MIR /XJ /R:1 /W:1 /NP /NFL /NDL *>> $LogFile
+    if ($LASTEXITCODE -ge 8) { throw "robocopy $From -> $To failed (exit code $LASTEXITCODE)" }
+}
+
+function Stop-Agent {
+    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.ExecutablePath -like "$InstallDir*" -or $_.CommandLine -like "*main_agent.py*" } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+}
+
+function Restore-InstallDir {
+    # Restores files only; a scheduled task the failed installer changed stays changed.
+    Stop-Agent
+    Remove-Tree -Path $InstallDir
+    New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+    # A folder recreated under C:\ inherits create rights for all users; code here runs as SYSTEM.
+    $acl = New-Object System.Security.AccessControl.DirectorySecurity
+    $acl.SetAccessRuleProtection($true, $false)
+    foreach ($sidValue in @("S-1-5-18", "S-1-5-32-544")) {
+        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule(
+            (New-Object System.Security.Principal.SecurityIdentifier($sidValue)), "FullControl",
+            "ContainerInherit, ObjectInherit", "None", "Allow")))
+    }
+    Set-Acl -LiteralPath $InstallDir -AclObject $acl
+    Invoke-Mirror -From $RollbackDir -To $InstallDir
+    Start-ScheduledTask -TaskName $TaskName
 }
 
 New-Item -ItemType Directory -Path $WorkDir -Force | Out-Null
@@ -80,6 +125,10 @@ try {
     $installer = Get-ChildItem -Path $srcDir -Recurse -Filter "Install-Agent.ps1" | Select-Object -First 1
     if (-not $installer) { throw "Install-Agent.ps1 not found in release archive" }
 
+    Write-Log "backing up $InstallDir"
+    Invoke-Mirror -From $InstallDir -To $RollbackDir
+    $script:BackedUp = $true
+
     # The release's own installer runs as a child so its 'exit' cannot end this script.
     $env:IPERF_MANAGER_REF = $script:Target
     $env:IPERF_AGENT_UPDATER = "1"
@@ -92,15 +141,27 @@ try {
 
     Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $srcDir -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Tree -Path $RollbackDir
     Write-State "ok"
     Write-Log "=== agent update done ($($script:Target))"
 } catch {
     Write-Log "update failed: $_"
-    # No file rollback: the ZIP path has already replaced the install dir. Try to bring the agent back.
+    # /status shows this text to dashboard users; the exception text can hold local paths.
+    $errorText = "update failed, see agent-update.log"
+    if ($script:BackedUp) {
+        try {
+            Restore-InstallDir
+            Remove-Tree -Path $RollbackDir
+            Write-Log "rolled back to $($script:Installed)"
+            $errorText = "update failed and was rolled back, see agent-update.log"
+        } catch {
+            Write-Log "rollback failed: $_ (backup kept in $RollbackDir)"
+            $errorText = "update failed, rollback failed, see agent-update.log"
+        }
+    }
     Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     try {
-        # /status shows this text to dashboard users; the exception text can hold local paths.
-        Write-State "failed" "update failed, see agent-update.log"
+        Write-State "failed" $errorText
     } catch {
         Write-Log "state write failed: $_"
     }

@@ -307,6 +307,8 @@ if ($Uninstall) {
         Remove-Item -Path $UpdaterDir -Recurse -Force
         Write-Ok "Removed $UpdaterDir"
     }
+    # Installers up to v1.2.1 stored the agent key here, readable by every local user.
+    [Environment]::SetEnvironmentVariable("AGENT_API_KEY", $null, "Machine")
 
     # Remove firewall rules
     Get-NetFirewallRule -DisplayName "${FwRulePrefix}*" -ErrorAction SilentlyContinue |
@@ -668,11 +670,6 @@ if ($PythonBin -eq "py -3") {
     $argList  = "`"$InstallDir\main_agent.py`""
 }
 
-# Build environment variables string for the action
-# We set LOCALAPPDATA to redirect config, and AGENT_LOGDIR for logs
-$envVars = "LOCALAPPDATA=$($InstallDir)\config"
-if ($Token) { $envVars += ";AGENT_API_KEY=$Token" }
-
 $action = New-ScheduledTaskAction `
     -Execute $exePath `
     -Argument $argList `
@@ -706,9 +703,9 @@ Register-ScheduledTask `
 # Config directory override: agent reads from $LOCALAPPDATA/iperf3-agent/config.json
 [Environment]::SetEnvironmentVariable("LOCALAPPDATA_IPERF", "$InstallDir\config", "Machine")
 [Environment]::SetEnvironmentVariable("AGENT_LOGDIR", $LogDir, "Machine")
-if ($Token) {
-    [Environment]::SetEnvironmentVariable("AGENT_API_KEY", $Token, "Machine")
-}
+# The agent reads its key from config.json only. Installers up to v1.2.1 also stored it here,
+# readable by every local user.
+[Environment]::SetEnvironmentVariable("AGENT_API_KEY", $null, "Machine")
 
 # Create a wrapper script that sets env vars and launches the agent
 $wrapperScript = Join-Path $InstallDir "start-agent.cmd"
@@ -718,9 +715,6 @@ REM iperf-manager agent launcher - sets environment and starts the agent
 set "LOCALAPPDATA=$InstallDir\config"
 set "AGENT_LOGDIR=$LogDir"
 "@
-if ($Token) {
-    $wrapperContent += "`nset `"AGENT_API_KEY=$Token`""
-}
 $wrapperContent += @"
 
 cd /d "$InstallDir"

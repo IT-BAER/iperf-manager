@@ -333,13 +333,6 @@ Environment="LOCALAPPDATA=${CONFIG_DIR}"
 Environment="AGENT_LOGDIR=${LOG_DIR}"
 SVCEOF
 
-# Inject API key as env var if provided
-if [[ -n "$API_TOKEN" ]]; then
-    cat >> "$SERVICE_FILE" <<TOKEOF
-Environment="AGENT_API_KEY=${API_TOKEN}"
-TOKEOF
-fi
-
 cat >> "$SERVICE_FILE" <<TAILEOF
 
 # Hardening

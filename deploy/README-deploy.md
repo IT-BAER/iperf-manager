@@ -261,7 +261,6 @@ Environment overrides:
 
 | Variable | Effect |
 |----------|--------|
-| `AGENT_API_KEY` | Overrides `api_token` |
 | `AGENT_MGMT_IP` | Overrides `advertise_ip` |
 | `AGENT_LOGDIR` | Overrides the log directory |
 

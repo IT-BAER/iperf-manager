@@ -8,7 +8,7 @@ and this project adheres to Semantic Versioning.
 ## [Unreleased]
 
 ### Added
-- Remote agent update: the dashboard shows each agent's version and an **Update** button when a newer GitHub release exists. The agent endpoint `POST /update` takes no parameters; it starts a separate updater (`iperf-agent-update.service` / scheduled task `iperf-agent-update`) that installs the latest release of `IT-BAER/iperf-manager` with that release's installer. Off by default; enable per agent with `--remote-update yes` / `-RemoteUpdate Yes`. Refused without an agent API token and while a test runs.
+- Remote agent update: the dashboard shows each agent's version and an **Update** button when a newer GitHub release exists. The agent endpoint `POST /update` takes no parameters; it starts a separate updater (`iperf-agent-update.service` / scheduled task `iperf-agent-update`) that installs the latest release of `IT-BAER/iperf-manager` with that release's installer. Off by default; enable per agent with `--remote-update yes` / `-RemoteUpdate Yes`. Refused without an agent API token and while a test runs. A failed update restores the previous version and restarts the agent (git checkout on Linux, a file copy on Windows).
 - Agent `/status` reports `version`, `remote_update` and the last update state.
 - The Windows installer supports `IPERF_MANAGER_SKIP_REPO_SYNC=1` for a staged local tree, like the Linux installer.
 
@@ -19,6 +19,7 @@ and this project adheres to Semantic Versioning.
 
 ### Security
 - The Windows installer limits `C:\iperf-manager` to SYSTEM and Administrators. Before, the folder inherited Modify rights for Authenticated Users from `C:\`, so a local user could change agent code that runs as SYSTEM, and read the agent API key in `config.json`. It also makes Administrators the owner of items a non-admin created in the install and updater folders, deletes links inside them, and refuses a folder that is itself a link.
+- The installers no longer copy the agent API key into the machine environment variable `AGENT_API_KEY`, `start-agent.cmd` or the systemd unit file, where every local user could read it. The agent never read these copies; it uses `api_token` in `config.json`. The Windows installer deletes an existing machine `AGENT_API_KEY` on install and uninstall.
 
 ## [1.2.1] - 2026-10-30
 
