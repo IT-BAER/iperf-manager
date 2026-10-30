@@ -790,13 +790,18 @@ def _refresh_agent(aid: str, info: dict) -> dict:
     api_key = info.get("api_key", "")
     pin = str(info.get("tls_fingerprint", "") or "")
     set_tls_pin(url, pin)
-    st = _check_agent(url, api_key)
-    if st and url.startswith("http://") and (st.get("tls") or {}).get("enabled"):
-        # The agent offers TLS: switch to https once and never back.
+    if url.startswith("http://"):
+        # Try TLS first so the key crosses the network in clear text only for agents without TLS.
+        # Once https works, the entry switches for good and never goes back.
         https_url = "https://" + url[len("http://"):]
-        st_tls = _check_agent(https_url, api_key)
-        if st_tls:
-            url, st = https_url, st_tls
+        set_tls_pin(https_url, pin)
+        st = _check_agent(https_url, api_key)
+        if st:
+            url = https_url
+        else:
+            st = _check_agent(url, api_key)
+    else:
+        st = _check_agent(url, api_key)
 
     tls_error = new_fingerprint = ""
     if url.startswith("https://"):

@@ -2,6 +2,7 @@ import json
 import os
 import socket
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -12,6 +13,51 @@ def _free_port():
     with socket.socket() as s:
         s.bind(('127.0.0.1', 0))
         return s.getsockname()[1]
+
+
+class _Relay:
+    """TCP relay in front of an agent that records every byte the dashboard sends."""
+
+    def __init__(self, target_port):
+        self._target = target_port
+        self._sent = []
+        self._lock = threading.Lock()
+        self._srv = socket.create_server(('127.0.0.1', 0))
+        self.port = self._srv.getsockname()[1]
+        threading.Thread(target=self._accept, daemon=True).start()
+
+    def _accept(self):
+        while True:
+            try:
+                client, _ = self._srv.accept()
+            except OSError:
+                return
+            upstream = socket.create_connection(('127.0.0.1', self._target))
+            threading.Thread(target=self._pump, args=(client, upstream, True), daemon=True).start()
+            threading.Thread(target=self._pump, args=(upstream, client, False), daemon=True).start()
+
+    def _pump(self, src, dst, record):
+        try:
+            while data := src.recv(65536):
+                if record:
+                    with self._lock:
+                        self._sent.append(data)
+                dst.sendall(data)
+        except OSError:
+            pass
+        finally:
+            for s in (src, dst):
+                try:
+                    s.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+
+    def sent(self):
+        with self._lock:
+            return b''.join(self._sent)
+
+    def close(self):
+        self._srv.close()
 
 
 @unittest.skipUnless(find_openssl(), 'openssl CLI not available')
@@ -90,6 +136,26 @@ class DashboardTlsTest(unittest.TestCase):
         [reloaded] = self._agent_list()
         self.assertEqual(reloaded['id'], agent['id'])
         self.assertEqual(reloaded['status'], 'online')
+
+    def test_adding_http_url_never_sends_the_key_in_clear_text(self):
+        relay = _Relay(self.port)
+        self.addCleanup(relay.close)
+        agent = self.client.post('/api/agents', json={'url': f'http://127.0.0.1:{relay.port}',
+                                                      'api_key': 'secret'}).get_json()
+        self.assertEqual(agent['url'], f'https://127.0.0.1:{relay.port}')
+        self.assertEqual(agent['tls_fingerprint'], self.svc.tls_fingerprint)
+        self.assertNotIn(b'secret', relay.sent())
+
+    def test_agent_without_tls_stays_on_http(self):
+        port = _free_port()
+        svc = AgentService(host='127.0.0.1', port=port, api_token='secret', advertise_ip='127.0.0.1')
+        svc.DISCOVER_PORT = _free_port()
+        svc.start()
+        self.agents.append(svc)
+        agent = self.client.post('/api/agents', json={'url': f'http://127.0.0.1:{port}',
+                                                      'api_key': 'secret'}).get_json()
+        self.assertEqual((agent['url'], agent['status'], agent['tls_fingerprint']),
+                         (f'http://127.0.0.1:{port}', 'online', ''))
 
     def test_changed_certificate_blocks_agent_until_new_fingerprint_is_trusted(self):
         agent = self.client.post('/api/agents', json={'url': self.https_url, 'api_key': 'secret'}).get_json()

@@ -9,7 +9,7 @@ and this project adheres to Semantic Versioning.
 
 ### Added
 - Agents serve HTTPS on their API port with a self-signed certificate that they create with the `openssl` CLI on first start. The same port still accepts plain HTTP, so older dashboards keep working. `"tls": false` in the agent config turns HTTPS off.
-- The dashboard switches an agent from `http://` to `https://` as soon as the agent reports TLS and pins the certificate SHA-256 fingerprint on first contact. A changed certificate marks the agent offline until you review and trust the new fingerprint. The agent keeps its ID, so profiles and schedules keep working.
+- The dashboard tries `https://` first for an agent stored or added as `http://`, so the API key goes over plain HTTP only to agents without TLS. Once https works, it pins the certificate SHA-256 fingerprint on first contact. A changed certificate marks the agent offline until you review and trust the new fingerprint. The agent keeps its ID, so profiles and schedules keep working.
 - Discovery advertises `https://` agents and updates an existing entry with the same host and port instead of adding a duplicate; it never downgrades a stored `https://` agent.
 - Installers print the agent certificate fingerprint; the Linux installer installs `openssl` when it is missing.
 
@@ -18,6 +18,7 @@ and this project adheres to Semantic Versioning.
 
 ### Security
 - API keys and test control traffic between dashboard and agents are encrypted once both run this release. Keys that were used over plain HTTP before may have been captured: set new agent tokens after the switch. iperf3 test traffic stays unencrypted (iperf3 limit).
+- The client option `--logfile` accepts only a plain file name and writes it into the agent log directory. Before, any caller with the API key could make iperf3, which runs as root on Linux, append to any path.
 
 ## [1.2.0] - 2026-10-29
 

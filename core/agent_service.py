@@ -607,14 +607,18 @@ class AgentService:
         if task.get('extra_args'):
             allowed = {
                 '--tos', '--dscp', '--dont-fragment', '--no-delay',
-                '--set-mss', '--congestion', '--logfile',
+                '--set-mss', '--congestion',
                 '-4', '-6', '--get-server-output', '--repeating-payload',
             }
             try:
                 for x in task['extra_args']:
                     arg = str(x).strip()
                     flag = arg.split('=')[0] if '=' in arg else arg
-                    if flag in allowed or (flag.startswith('--') and flag in allowed):
+                    name = arg.partition('=')[2]
+                    if flag == '--logfile' and re.fullmatch(r'[A-Za-z0-9_-][A-Za-z0-9._-]*', name):
+                        # iperf3 runs as root: only a plain file name, written inside the log dir.
+                        args.append('--logfile=' + os.path.join(self.LOG_DIR, name))
+                    elif flag in allowed or (flag.startswith('--') and flag in allowed):
                         args.append(arg)
                     else:
                         self._log('WARN', 'client', f'extra_args: blocked {arg!r}')
