@@ -34,6 +34,33 @@ jobs:
       - name: Python syntax and import checks
         run: python -m py_compile main_agent.py main_web.py core/*.py web/app.py
 
+      - name: Deploy script syntax checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in deploy/*.sh; do bash -n "$f"; done
+          pwsh -NoProfile -Command '
+            $failed = $false
+            foreach ($f in Get-ChildItem deploy/*.ps1) {
+              $t = $null; $e = $null
+              [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$t, [ref]$e) | Out-Null
+              foreach ($err in $e) { Write-Host "$($f.Name):$($err.Extent.StartLineNumber): $($err.Message)"; $failed = $true }
+            }
+            if ($failed) { exit 1 }'
+
+      # Agents compare AGENT_VERSION with the latest release tag; a mismatch shows them outdated after every update.
+      - name: Tag matches core/constants.py versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          for name in AGENT_VERSION DASHBOARD_VERSION; do
+            grep -qE "^${name} = '${tag//./\\.}'$" core/constants.py || {
+              echo "${name} in core/constants.py does not match tag ${GITHUB_REF_NAME}"
+              exit 1
+            }
+          done
+
       - name: Python test discovery
         shell: bash
         run: |

@@ -19,6 +19,10 @@
 .PARAMETER InstallDir
     Installation directory (default: C:\iperf-manager).
 
+.PARAMETER RemoteUpdate
+    Yes or No: allow the dashboard to update this agent. Default on first
+    install: No. Reruns keep the current value unless this is passed.
+
 .PARAMETER Uninstall
     Remove agent, scheduled task, config and firewall rules.
 
@@ -33,6 +37,8 @@ param(
     [int]$Port           = 9001,
     [string]$IperfPorts  = "5211,5212",
     [string]$InstallDir  = "C:\iperf-manager",
+    [ValidateSet("", "Yes", "No")]
+    [string]$RemoteUpdate = "",
     [switch]$Uninstall
 )
 
@@ -41,6 +47,8 @@ $ErrorActionPreference = "Stop"
 # ── Constants ────────────────────────────────────────────────────────
 $TaskName       = "iperf-agent"
 $TaskDescription = "iperf-manager Agent (headless) - network performance testing"
+$UpdateTaskName = "iperf-agent-update"
+$UpdaterDir     = Join-Path $env:ProgramData "iperf-manager"
 $ConfigDir      = Join-Path $InstallDir "config\iperf3-agent"
 $LogDir         = Join-Path $InstallDir "logs"
 $RepoUrl        = "https://github.com/IT-BAER/iperf-manager.git"
@@ -210,6 +218,60 @@ function Stop-AgentProcesses {
     }
 }
 
+function Set-AdminOnlyAcl {
+    # SYSTEM and Administrators only, no inherited entries: the agent runs this code as SYSTEM,
+    # and a folder under C:\ inherits Modify for Authenticated Users by default.
+    param([string]$Path)
+    if ((Get-Item -LiteralPath $Path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw "$Path is a link; remove it and run the installer again"
+    }
+    $null = Set-AdminOwner -Path $Path
+    $acl = New-Object System.Security.AccessControl.DirectorySecurity
+    $acl.SetAccessRuleProtection($true, $false)
+    $inherit = [System.Security.AccessControl.InheritanceFlags]"ContainerInherit, ObjectInherit"
+    foreach ($sidValue in @("S-1-5-18", "S-1-5-32-544")) {
+        $sid = New-Object System.Security.Principal.SecurityIdentifier($sidValue)
+        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule(
+            $sid, "FullControl", $inherit, [System.Security.AccessControl.PropagationFlags]::None, "Allow")))
+    }
+    Set-Acl -LiteralPath $Path -AclObject $acl
+    Reset-ForeignItems -Path $Path
+}
+
+# SYSTEM, Administrators, TrustedInstaller and the admin running this installer.
+$TrustedOwnerSids = @("S-1-5-18", "S-1-5-32-544",
+    "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464",
+    [Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
+
+function Set-AdminOwner {
+    # An owner can always rewrite the DACL, so a user who created an item here could grant themselves access again.
+    param([string]$Path)
+    $acl = $null
+    try { $acl = Get-Acl -LiteralPath $Path } catch { }
+    if ($acl -and $TrustedOwnerSids -contains $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value) { return $false }
+    & takeown.exe /F $Path /A | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "takeown failed on $Path (exit code $LASTEXITCODE)" }
+    return $true
+}
+
+function Reset-ForeignItems {
+    # Walks by hand, top-down: icacls /T follows junctions (also with /L). Nothing the installer writes is a link.
+    param([string]$Path)
+    foreach ($child in Get-ChildItem -LiteralPath $Path -Force) {
+        if ($child.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            if ($child.PSIsContainer) { [IO.Directory]::Delete($child.FullName) } else { [IO.File]::Delete($child.FullName) }
+            Write-Warn "Removed link $($child.FullName)"
+            continue
+        }
+        $foreign = Set-AdminOwner -Path $child.FullName
+        if ($foreign -or (Get-Acl -LiteralPath $child.FullName).AreAccessRulesProtected) {
+            & icacls.exe $child.FullName /reset /Q | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "icacls /reset failed on $($child.FullName) (exit code $LASTEXITCODE)" }
+        }
+        if ($child.PSIsContainer) { Reset-ForeignItems -Path $child.FullName }
+    }
+}
+
 function Test-Admin {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [Security.Principal.WindowsPrincipal]$identity
@@ -235,10 +297,15 @@ if ($Uninstall) {
     Write-Ok "Stopped running agent processes"
 
     # Remove scheduled task
-    $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    if ($existingTask) {
-        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
-        Write-Ok "Removed scheduled task '$TaskName'"
+    foreach ($name in @($TaskName, $UpdateTaskName)) {
+        if (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue) {
+            Unregister-ScheduledTask -TaskName $name -Confirm:$false
+            Write-Ok "Removed scheduled task '$name'"
+        }
+    }
+    if (Test-Path $UpdaterDir) {
+        Remove-Item -Path $UpdaterDir -Recurse -Force
+        Write-Ok "Removed $UpdaterDir"
     }
 
     # Remove firewall rules
@@ -417,8 +484,9 @@ $gitDir = Join-Path $InstallDir ".git"
 # Stop running agent processes to avoid file locks during update/replace.
 Stop-AgentProcesses
 
+$skipRepoSync = $env:IPERF_MANAGER_SKIP_REPO_SYNC -match '^(1|true|yes|on)$'
 $gitCmd = Get-Command "git" -ErrorAction SilentlyContinue
-if (-not $gitCmd) {
+if (-not $gitCmd -and -not $skipRepoSync) {
     Write-Warn "Git not found. Attempting automatic installation ..."
     try {
         Install-Git
@@ -430,7 +498,12 @@ if (-not $gitCmd) {
 
 $canUseGit = $null -ne $gitCmd
 
-if ($canUseGit -and (Test-Path $gitDir)) {
+if ($skipRepoSync) {
+    if (-not (Test-Path (Join-Path $InstallDir "main_agent.py"))) {
+        throw "IPERF_MANAGER_SKIP_REPO_SYNC=1 requires an existing tree in $InstallDir"
+    }
+    Write-Ok "Using existing tree in $InstallDir without download"
+} elseif ($canUseGit -and (Test-Path $gitDir)) {
     Write-Step "Repository exists - syncing ref $RepoRef ..."
     & git -C $InstallDir fetch --quiet origin --tags 2>$null
 
@@ -546,18 +619,30 @@ Write-Step "Writing configuration ..."
 New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null
 New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
 
+Set-AdminOnlyAcl -Path $InstallDir
+
 $configFile = Join-Path $ConfigDir "config.json"
-$configObj = @{
-    autostart    = $IperfPorts
-    bind_host    = "0.0.0.0"
-    port         = $Port
-    iperf3_path  = $iperf3Exe
-    advertise_ip = ""
-    api_token    = $Token
+# Reruns keep the values in config.json unless the parameter is passed again.
+$configArgs = @("-m", "core.agent_config", $configFile, "--iperf3-path", $iperf3Exe)
+if ($PSBoundParameters.ContainsKey("Port")) { $configArgs += @("--port", $Port) }
+if ($PSBoundParameters.ContainsKey("IperfPorts")) { $configArgs += @("--autostart", $IperfPorts) }
+if ($RemoteUpdate) { $configArgs += @("--remote-update", $RemoteUpdate.ToLower()) }
+if ($PythonBin -eq "py -3") { $pyExe = "py"; $configArgs = @("-3") + $configArgs } else { $pyExe = $PythonBin }
+$env:AGENT_CONFIG_API_TOKEN = $Token
+Push-Location $InstallDir
+try {
+    & $pyExe @configArgs
+    if ($LASTEXITCODE -ne 0) { throw "config merge failed (exit code $LASTEXITCODE)" }
+} finally {
+    Pop-Location
+    Remove-Item Env:\AGENT_CONFIG_API_TOKEN -ErrorAction SilentlyContinue
 }
-$configJson = $configObj | ConvertTo-Json -Depth 4
-[System.IO.File]::WriteAllText($configFile, $configJson, (New-Object System.Text.UTF8Encoding($false)))
-Write-Ok "Config written to $configFile"
+# Firewall rules, task and summary use the effective values, which may come from an earlier run.
+$effectiveConfig = Get-Content -Raw -LiteralPath $configFile | ConvertFrom-Json
+$Port = [int]$effectiveConfig.port
+$IperfPorts = [string]$effectiveConfig.autostart
+$remoteUpdateState = if ($effectiveConfig.allow_remote_update -eq $true) { "yes" } else { "no" }
+Write-Ok "Config written to $configFile (remote update: $remoteUpdateState)"
 
 # ── 5. Create scheduled task ────────────────────────────────────────
 Write-Step "Creating scheduled task ..."
@@ -662,18 +747,53 @@ Register-ScheduledTask `
 
 Write-Ok "Scheduled task '$TaskName' created (runs at startup as SYSTEM)"
 
+# ── 5b. Updater task (started by the agent's /update endpoint) ──────
+New-Item -ItemType Directory -Path $UpdaterDir -Force | Out-Null
+Set-AdminOnlyAcl -Path $UpdaterDir
+$updaterScript = Join-Path $UpdaterDir "Agent-Update.ps1"
+Copy-Item -Path (Join-Path $InstallDir "deploy\Agent-Update.ps1") -Destination $updaterScript -Force
+if ($env:IPERF_AGENT_UPDATER) {
+    # Running inside the updater task: its definition does not change and must not be replaced mid-run.
+    Write-Ok "Updater script refreshed at $updaterScript"
+} else {
+    $updateAction = New-ScheduledTaskAction `
+        -Execute "powershell.exe" `
+        -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$updaterScript`" -InstallDir `"$InstallDir`"" `
+        -WorkingDirectory $UpdaterDir
+    $updateSettings = New-ScheduledTaskSettingsSet `
+        -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries `
+        -ExecutionTimeLimit (New-TimeSpan -Minutes 15)
+    Register-ScheduledTask `
+        -TaskName $UpdateTaskName `
+        -Action $updateAction `
+        -Principal $principal `
+        -Settings $updateSettings `
+        -Description "iperf-manager Agent updater (latest release)" `
+        -Force | Out-Null
+    Write-Ok "Scheduled task '$UpdateTaskName' created (remote update: $remoteUpdateState)"
+}
+
 # ── 6. Firewall rules ───────────────────────────────────────────────
 Write-Step "Configuring firewall rules ..."
+
+# Keep a source restriction an admin set on the API rule (for example: dashboard host only).
+$apiRemote = @(Get-NetFirewallRule -DisplayName "${FwRulePrefix} API (TCP *)" -ErrorAction SilentlyContinue |
+    Get-NetFirewallAddressFilter | ForEach-Object { $_.RemoteAddress } | Where-Object { $_ -and $_ -ne "Any" } |
+    Sort-Object -Unique)
 
 # Remove old rules first (idempotent)
 Get-NetFirewallRule -DisplayName "${FwRulePrefix}*" -ErrorAction SilentlyContinue |
     Remove-NetFirewallRule -ErrorAction SilentlyContinue
 
 # API port
-New-NetFirewallRule `
-    -DisplayName "${FwRulePrefix} API (TCP ${Port})" `
-    -Direction Inbound -Protocol TCP -LocalPort $Port `
-    -Action Allow -Profile Any | Out-Null
+$apiRuleArgs = @{
+    DisplayName = "${FwRulePrefix} API (TCP ${Port})"
+    Direction = "Inbound"; Protocol = "TCP"; LocalPort = $Port; Action = "Allow"; Profile = "Any"
+}
+if ($apiRemote.Count -gt 0) { $apiRuleArgs.RemoteAddress = $apiRemote }
+New-NetFirewallRule @apiRuleArgs | Out-Null
+if ($apiRemote.Count -gt 0) { Write-Ok "API rule keeps remote address: $($apiRemote -join ', ')" }
 
 # Discovery port
 New-NetFirewallRule `

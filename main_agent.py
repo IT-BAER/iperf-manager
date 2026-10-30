@@ -34,6 +34,7 @@ def main():
         advertise_ip=cfg.get('advertise_ip', ''),
         api_token=cfg.get('api_token', ''),
         tls_dir=None if cfg.get('tls', True) is False else str(CFG_DIR),
+        allow_remote_update=cfg.get('allow_remote_update') is True,
     )
     service.start()
     print(f'[Agent] Running at {service.base_url()}')

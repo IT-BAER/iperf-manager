@@ -10,6 +10,15 @@ export interface Agent {
   tls_new_fingerprint?: string
 }
 
+/** Contents of the agent's update-state.json, written by the agent and its updater. */
+export interface AgentUpdateState {
+  state?: 'requested' | 'running' | 'ok' | 'failed' | 'current'
+  from?: string
+  to?: string
+  started?: number
+  error?: string
+}
+
 export interface TestState {
   status: 'idle' | 'running' | 'stopping'
   started_at?: number

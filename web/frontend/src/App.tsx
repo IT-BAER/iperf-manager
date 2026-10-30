@@ -3,7 +3,7 @@ import type { MouseEvent as ReactMouseEvent } from 'react'
 import { useSocket } from './hooks/useSocket'
 import { api } from './api'
 import { formatMbps as fmtMbps } from './format'
-import type { Agent, AuthSession, TestState, TestConfig, Metrics, LogEntry, Profile, ScheduledTest } from './types'
+import type { Agent, AgentUpdateState, AuthSession, TestState, TestConfig, Metrics, LogEntry, Profile, ScheduledTest } from './types'
 
 import { AuthPanel } from './components/AuthPanel'
 import { Header } from './components/Header'
@@ -222,6 +222,9 @@ export function App() {
   const [auth, setAuth] = useState<AuthSession | null>(null)
   const [authBusy, setAuthBusy] = useState(false)
   const [agents, setAgents] = useState<Agent[]>([])
+  const [latestAgentVersion, setLatestAgentVersion] = useState<string | null>(null)
+  // Agent id -> time the update was requested (ms); polled until the agent reports a final state.
+  const [updatingAgents, setUpdatingAgents] = useState<ReadonlyMap<string, number>>(new Map())
   const [testState, setTestState] = useState<TestState>({ status: 'idle' })
   const [latestMetrics, setLatestMetrics] = useState<Metrics | null>(null)
   const [metricsHistory, setMetricsHistory] = useState<MetricPoint[]>([])
@@ -398,6 +401,46 @@ export function App() {
       toast(`Trusted new certificate for "${data.name}"`, data.status === 'online' ? 'ok' : 'info')
     }
   }, [toast])
+
+  const updateAgentRelease = useCallback(async (id: string) => {
+    const data = await api<AgentUpdateState>(`/api/agents/${id}/update`, { method: 'POST' })
+    if (data) {
+      setUpdatingAgents(prev => new Map(prev).set(id, Date.now()))
+      toast('Agent update started', 'info')
+    }
+  }, [toast])
+
+  useEffect(() => {
+    if (updatingAgents.size === 0) return
+    const timer = window.setInterval(async () => {
+      const data = await api<Agent[]>('/api/agents?refresh=1')
+      if (!data) return
+      setAgents(data)
+      const finished: string[] = []
+      updatingAgents.forEach((started, id) => {
+        const agent = data.find(a => a.id === id)
+        const update = (agent?.details?.update ?? {}) as AgentUpdateState
+        const final = agent?.status === 'online' && update.state && !['requested', 'running'].includes(update.state)
+        if (agent && final) {
+          if (update.state === 'ok') toast(`"${agent.name}" updated to ${update.to}`, 'ok')
+          else if (update.state === 'current') toast(`"${agent.name}" already runs the latest release`, 'info')
+          else toast(`Update of "${agent.name}" failed: ${update.error || 'unknown error'}`, 'err')
+          finished.push(id)
+        } else if (!agent || Date.now() - started > 15 * 60 * 1000) {
+          if (agent) toast(`Update of "${agent.name}" did not finish within 15 minutes`, 'err')
+          finished.push(id)
+        }
+      })
+      if (finished.length) {
+        setUpdatingAgents(prev => {
+          const next = new Map(prev)
+          finished.forEach(id => next.delete(id))
+          return next
+        })
+      }
+    }, 5000)
+    return () => window.clearInterval(timer)
+  }, [toast, updatingAgents])
 
   const removeAgent = useCallback(async (id: string) => {
     await api(`/api/agents/${id}`, { method: 'DELETE' })
@@ -596,6 +639,8 @@ export function App() {
       if (stored) setAgents(stored)
       await refreshAgents()
       await discoverAgents({ silent: true })
+      const release = await api<{ latest: string | null }>('/api/meta/agent-release')
+      setLatestAgentVersion(release?.latest ?? null)
     })()
   }, [auth, discoverAgents, isAuthenticated, refreshAgents])
 
@@ -663,6 +708,9 @@ export function App() {
         <Sidebar
           open={sidebarOpen}
           agents={agents}
+          latestAgentVersion={latestAgentVersion}
+          updatingAgents={updatingAgents}
+          onUpdateAgent={updateAgentRelease}
           onRefresh={refreshAgents}
           onAdd={addAgent}
           onUpdateAgentKey={updateAgentKey}

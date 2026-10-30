@@ -24,6 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 from pathlib import Path
 
+from core.constants import AGENT_VERSION
 from core.helpers import (
     IS_WIN,
     CREATE_NO_WINDOW,
@@ -34,8 +35,6 @@ from core.helpers import (
     list_local_interfaces,
 )
 from core.net_utils import cert_fingerprint
-
-AGENT_VERSION = '6.0.2'
 
 # --- config persistence ---
 # Prefer installer-provided override when available (especially for Windows
@@ -108,6 +107,17 @@ def ensure_agent_cert(directory) -> tuple[str, str] | None:
     return cert, key
 
 
+def launch_updater():
+    """Start the installer-managed updater unit/task; it runs outside the agent's sandbox and process tree."""
+    if IS_WIN:
+        cmd = ['schtasks.exe', '/Run', '/TN', 'iperf-agent-update']
+    else:
+        cmd = ['systemctl', 'start', '--no-block', 'iperf-agent-update.service']
+    proc = subprocess.run(cmd, capture_output=True, timeout=30, creationflags=CREATE_NO_WINDOW if IS_WIN else 0)
+    if proc.returncode != 0:
+        raise RuntimeError(f'updater start failed (exit code {proc.returncode})')
+
+
 class AgentService:
     """Manages iperf3 server/client subprocesses with thread-safe state.
 
@@ -118,6 +128,7 @@ class AgentService:
     DISCOVER_PORT = 9999
     MAX_SERVERS = 50
     MAX_CLIENTS = 50
+    UPDATE_TIMEOUT_SEC = 15 * 60
 
     def __init__(
         self,
@@ -128,8 +139,14 @@ class AgentService:
         advertise_ip: str | None = None,
         api_token: str = '',
         tls_dir: str | None = None,
+        allow_remote_update: bool = False,
+        update_launcher=None,
     ):
         self.host = host
+        self.allow_remote_update = bool(allow_remote_update)
+        self.update_launcher = update_launcher or launch_updater
+        # Written by the updater (deploy/agent-update.sh, Agent-Update.ps1) and read back by /status.
+        self.update_state_file = CFG_DIR / 'update-state.json'
         self.tls_dir = tls_dir
         self.tls_fingerprint: str | None = None
         self.port = int(port)
@@ -264,6 +281,13 @@ class AgentService:
                 return socket.gethostbyname(socket.gethostname())
             except Exception:
                 return '127.0.0.1'
+
+    def _read_update_state(self) -> dict:
+        try:
+            state = json.loads(Path(self.update_state_file).read_text(encoding='utf-8-sig'))
+        except (OSError, ValueError):
+            return {}
+        return state if isinstance(state, dict) else {}
 
     def _to_float(self, s):
         if s is None:
@@ -901,6 +925,9 @@ class AgentService:
                             'enabled': outer.tls_fingerprint is not None,
                             'fingerprint': outer.tls_fingerprint,
                         },
+                        'version': AGENT_VERSION,
+                        'remote_update': outer.allow_remote_update,
+                        'update': outer._read_update_state(),
                     })
                     return
                 if p.path == '/metrics':
@@ -931,6 +958,11 @@ class AgentService:
                         data = json.loads(body.decode('utf-8'))
                     except Exception:
                         data = {}
+
+                    if p.path == '/update':
+                        code, obj = outer.request_update()
+                        self._json(code, obj)
+                        return
 
                     if p.path == '/server/start':
                         ports = data.get('ports', [5201])
@@ -1153,6 +1185,32 @@ class AgentService:
         self.httpd = None
         self.http_thread = None
         self.disc_thread = None
+
+    def request_update(self) -> tuple[int, dict]:
+        """Start the updater; it installs the latest release itself, so the caller passes nothing."""
+        if not (self.allow_remote_update and self.api_token):
+            return 403, {'error': 'remote update disabled'}
+        with self.LOCK:
+            if any(info.get('exit_code') is None and not info.get('finished_ts')
+                   for info in self.CLIENT_PROCS.values()):
+                return 409, {'error': 'test running'}
+            state = self._read_update_state()
+            # A pending state older than the updater can run means the updater died; allow a retry.
+            if state.get('state') in ('requested', 'running') and \
+                    time.time() - float(state.get('started') or 0) < self.UPDATE_TIMEOUT_SEC:
+                return 409, {'error': 'update already in progress'}
+            self._write_update_state({'state': 'requested', 'from': AGENT_VERSION, 'started': time.time()})
+        try:
+            self.update_launcher()
+        except Exception as e:
+            # Exception text can hold local paths; it goes to the log only, never to /status.
+            print(f'[ERROR][agent-update] updater start failed: {e}')
+            self._write_update_state({'state': 'failed', 'from': AGENT_VERSION, 'error': 'updater start failed'})
+            return 500, {'error': 'updater start failed'}
+        return 202, {'state': 'requested'}
+
+    def _write_update_state(self, state: dict):
+        Path(self.update_state_file).write_text(json.dumps(state), encoding='utf-8')
 
     def current_servers(self) -> list[int]:
         with self.LOCK:

@@ -7,7 +7,18 @@ and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
-- No changes yet.
+### Added
+- Remote agent update: the dashboard shows each agent's version and an **Update** button when a newer GitHub release exists. The agent endpoint `POST /update` takes no parameters; it starts a separate updater (`iperf-agent-update.service` / scheduled task `iperf-agent-update`) that installs the latest release of `IT-BAER/iperf-manager` with that release's installer. Off by default; enable per agent with `--remote-update yes` / `-RemoteUpdate Yes`. Refused without an agent API token and while a test runs.
+- Agent `/status` reports `version`, `remote_update` and the last update state.
+- The Windows installer supports `IPERF_MANAGER_SKIP_REPO_SYNC=1` for a staged local tree, like the Linux installer.
+
+### Fixed
+- Agents reported the stale version `6.0.2` in discovery; they now report the release version.
+- Installer reruns keep the existing `config.json` values (API port, iperf3 ports, bind host, advertise IP) unless the option is passed again; before, they reset them to defaults.
+- The Windows installer keeps a remote-address restriction on the "iperf-manager API" firewall rule when it recreates the rules.
+
+### Security
+- The Windows installer limits `C:\iperf-manager` to SYSTEM and Administrators. Before, the folder inherited Modify rights for Authenticated Users from `C:\`, so a local user could change agent code that runs as SYSTEM, and read the agent API key in `config.json`. It also makes Administrators the owner of items a non-admin created in the install and updater folders, deletes links inside them, and refuses a folder that is itself a link.
 
 ## [1.2.1] - 2026-10-30
 

@@ -33,6 +33,15 @@ class TlsPinError(OSError):
     """Agent certificate does not match the pinned fingerprint."""
 
 
+class AgentHTTPError(RuntimeError):
+    """Agent answered with a non-2xx status."""
+
+    def __init__(self, status: int, body: bytes):
+        self.status = status
+        self.body = body.decode('utf-8', 'replace')[:200]
+        super().__init__(f'HTTP {status}: {self.body}')
+
+
 _tls_pins: dict[str, str] = {}      # 'host:port' -> expected fingerprint
 _tls_observed: dict[str, str] = {}  # 'host:port' -> fingerprint seen on the last TLS connect
 
@@ -167,7 +176,7 @@ def http_post_json(base, path, payload, timeout=6, api_key=None):
         body = resp.read()
         if 200 <= resp.status < 300:
             return json.loads(body.decode('utf-8', 'replace'))
-        raise RuntimeError(f'HTTP {resp.status}: {body.decode("utf-8","replace")[:200]}')
+        raise AgentHTTPError(resp.status, body)
     except TlsPinError:
         _pool.remove(scheme, host, port)
         raise
@@ -181,7 +190,7 @@ def http_post_json(base, path, payload, timeout=6, api_key=None):
             body = resp.read()
             if 200 <= resp.status < 300:
                 return json.loads(body.decode('utf-8', 'replace'))
-            raise RuntimeError(f'HTTP {resp.status}: {body.decode("utf-8","replace")[:200]}')
+            raise AgentHTTPError(resp.status, body)
         except Exception:
             _pool.remove(scheme, host, port)
             # urllib would verify the self-signed agent certificate against CAs and fail.
@@ -190,8 +199,11 @@ def http_post_json(base, path, payload, timeout=6, api_key=None):
             # 최종 fallback: urllib
             url = base.rstrip('/') + path
             req = urllib.request.Request(url, data=data, headers=headers)
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return json.loads(resp.read().decode('utf-8', 'replace'))
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    return json.loads(resp.read().decode('utf-8', 'replace'))
+            except urllib.error.HTTPError as e:
+                raise AgentHTTPError(e.code, e.read()) from None
 
 
 def http_get_json(base, path, timeout=1.5, api_key=None):
