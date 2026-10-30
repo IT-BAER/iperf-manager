@@ -361,6 +361,18 @@ export function App() {
       const data = await api<Agent[]>('/api/agents?refresh=1')
       if (data) {
         setAgents(data)
+        // Updates started from another browser or before a reload join the poll; the agent
+        // treats a pending state older than 15 minutes as stale, and so does this check.
+        const now = Date.now()
+        const pending = data.filter(a => ['requested', 'running'].includes(a.details?.update?.state ?? '')
+          && now - (a.details.update?.started ?? 0) * 1000 < 15 * 60 * 1000)
+        if (pending.length) {
+          setUpdatingAgents(prev => {
+            const next = new Map(prev)
+            pending.forEach(a => { if (!next.has(a.id)) next.set(a.id, (a.details.update?.started ?? 0) * 1000) })
+            return next
+          })
+        }
         const online = data.filter(a => a.status === 'online').length
         toast(`${online}/${data.length} agents online`, online === data.length ? 'ok' : 'info')
       }
@@ -413,13 +425,15 @@ export function App() {
   useEffect(() => {
     if (updatingAgents.size === 0) return
     const timer = window.setInterval(async () => {
-      const data = await api<Agent[]>('/api/agents?refresh=1')
+      // Only the agents being updated: a full refresh waits seconds for each offline agent.
+      const ids = [...updatingAgents.keys()].map(encodeURIComponent).join(',')
+      const data = await api<Agent[]>(`/api/agents?refresh_ids=${ids}`)
       if (!data) return
       setAgents(data)
       const finished: string[] = []
       updatingAgents.forEach((started, id) => {
         const agent = data.find(a => a.id === id)
-        const update = (agent?.details?.update ?? {}) as AgentUpdateState
+        const update = agent?.details?.update ?? {}
         const final = agent?.status === 'online' && update.state && !['requested', 'running'].includes(update.state)
         if (agent && final) {
           if (update.state === 'ok') toast(`"${agent.name}" updated to ${update.to}`, 'ok')
@@ -633,14 +647,15 @@ export function App() {
     if (didInitializeAgents.current) return
     didInitializeAgents.current = true
 
+    // Independent of the agent probes below, which can take seconds per offline agent.
+    void api<{ latest: string | null }>('/api/meta/agent-release')
+      .then(release => setLatestAgentVersion(release?.latest ?? null))
     void (async () => {
       // Show the stored list at once; the live probe below can take seconds per offline agent.
       const stored = await api<Agent[]>('/api/agents')
       if (stored) setAgents(stored)
       await refreshAgents()
       await discoverAgents({ silent: true })
-      const release = await api<{ latest: string | null }>('/api/meta/agent-release')
-      setLatestAgentVersion(release?.latest ?? null)
     })()
   }, [auth, discoverAgents, isAuthenticated, refreshAgents])
 

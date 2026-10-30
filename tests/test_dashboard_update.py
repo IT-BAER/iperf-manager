@@ -1,7 +1,9 @@
+import io
 import os
 import socket
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -84,6 +86,28 @@ class DashboardUpdateTest(unittest.TestCase):
         self.assertEqual(self.client.post(f"/api/agents/{agent['id']}/update").status_code, 202)
         rsp = self.client.post(f"/api/agents/{agent['id']}/update")
         self.assertEqual((rsp.status_code, rsp.get_json()), (409, {'error': 'update already in progress'}))
+
+    def test_agent_error_answer_is_not_sent_again(self):
+        agent = self._add_agent()
+        svc = self.agents[-1]
+
+        def fail():
+            self.launches.append(1)
+            raise RuntimeError('boom')
+
+        svc.update_launcher = fail
+        with redirect_stdout(io.StringIO()):
+            rsp = self.client.post(f"/api/agents/{agent['id']}/update")
+        self.assertEqual((rsp.status_code, rsp.get_json()), (500, {'error': 'updater start failed'}))
+        self.assertEqual(self.launches, [1])
+
+    def test_agent_list_refreshes_only_the_requested_agents(self):
+        with self.app._agents_lock:
+            self.app._agents.update({'a': {'url': 'http://a'}, 'b': {'url': 'http://b'}, 'c': {'url': 'http://c'}})
+        with mock.patch.object(self.app, '_refresh_agent') as refresh:
+            rsp = self.client.get('/api/agents?refresh_ids=a,c,unknown')
+        self.assertEqual(rsp.status_code, 200)
+        self.assertEqual(sorted(call.args[0] for call in refresh.call_args_list), ['a', 'c'])
 
     def test_update_route_unknown_agent(self):
         self.assertEqual(self.client.post('/api/agents/nope/update').status_code, 404)

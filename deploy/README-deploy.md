@@ -175,6 +175,8 @@ curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/deploy/install-agen
 - The agent refuses the update request while a test runs. The agent restarts during the update, so do not start tests until it ends.
 - Reruns of the installers keep the existing `config.json` values (port, iperf3 ports, advertise IP, remote update) unless you pass the option again. The Windows installer also keeps a remote-address restriction on the API firewall rule.
 - Log: `/var/log/iperf-manager/agent-update.log` (Linux), `C:\ProgramData\iperf-manager\agent-update.log` (Windows). State: `update-state.json` next to `config.json`.
+- A failed update restores the previous version: on Linux the git checkout and the `iperf-agent` unit file, on Windows the install folder and the `iperf-agent` task. The state then says "rolled back" (Windows) and the log has the details.
+- Downgrade warning: installers before v1.3.0 store the agent API key in the systemd unit (Linux) or in a machine environment variable and `start-agent.cmd` (Windows), all readable by local users, and the Windows one resets the "iperf-manager API" firewall rule to any remote address. After a downgrade, check both by hand or install v1.3.0 or later again.
 - Manual run as root/Administrator for one ref: `/usr/local/lib/iperf-manager/agent-update.sh --ref v1.3.0` or `C:\ProgramData\iperf-manager\Agent-Update.ps1 -Ref v1.3.0`.
 
 ## Security Notes

@@ -13,10 +13,13 @@ STATE_FILE="/etc/iperf-manager/iperf3-agent/update-state.json"
 LOG_FILE="/var/log/iperf-manager/agent-update.log"
 RELEASE_API="https://api.github.com/repos/IT-BAER/iperf-manager/releases/latest"
 SERVICE_NAME="iperf-agent"
+SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 FORCED_REF=""
 if [[ "${1:-}" == "--ref" ]]; then
     FORCED_REF="${2:-}"
     [[ "$FORCED_REF" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "invalid ref: ${FORCED_REF}" >&2; exit 2; }
+    echo "Installing ${FORCED_REF} even if it is older than the installed version." \
+        "Installers before v1.3.0 write the agent API key into ${SERVICE_FILE} (readable by all users)." >&2
 fi
 
 mkdir -p "$(dirname "$LOG_FILE")"
@@ -24,6 +27,7 @@ exec >>"$LOG_FILE" 2>&1
 echo "=== $(date -Is) agent update start"
 
 INSTALLED=""
+UNIT_BACKUP=""
 TARGET=""
 STARTED="$(date +%s)"
 
@@ -50,6 +54,10 @@ on_error() {
     echo "update failed at line ${line}"
     if [[ -n "${PREVIOUS:-}" ]]; then
         git -C "$INSTALL_DIR" checkout -f -q "$PREVIOUS" || true
+        # The failed installer may have rewritten the unit for the new code.
+        if [[ -n "$UNIT_BACKUP" ]]; then
+            cp -p "$UNIT_BACKUP" "$SERVICE_FILE" && rm -f "$UNIT_BACKUP" && systemctl daemon-reload || true
+        fi
         systemctl restart "$SERVICE_NAME" || true
     fi
     # /status shows this text to dashboard users, so it names the log but not its path.
@@ -77,11 +85,14 @@ fi
 
 echo "updating ${INSTALLED} -> ${TARGET}"
 write_state running
+UNIT_BACKUP="$(mktemp)"
+cp -p "$SERVICE_FILE" "$UNIT_BACKUP"
 PREVIOUS="$(git -C "$INSTALL_DIR" rev-parse HEAD)"
 git -C "$INSTALL_DIR" fetch --quiet --tags origin
 git -C "$INSTALL_DIR" checkout -f -q "tags/${TARGET}" 2>/dev/null \
     || git -C "$INSTALL_DIR" checkout -f -q "origin/${TARGET}"
 # The release's own installer runs; the repo is already at the target ref.
 IPERF_MANAGER_SKIP_REPO_SYNC=1 bash "${INSTALL_DIR}/deploy/install-agent-linux.sh" --ref "$TARGET"
+rm -f "$UNIT_BACKUP"
 write_state ok
 echo "=== $(date -Is) agent update done (${TARGET})"

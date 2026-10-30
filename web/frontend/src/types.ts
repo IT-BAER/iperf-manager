@@ -4,7 +4,11 @@ export interface Agent {
   name: string
   status: 'online' | 'offline' | 'unknown'
   last_seen: number | null
-  details: Record<string, unknown>
+  details: Record<string, unknown> & {
+    version?: string
+    remote_update?: boolean
+    update?: AgentUpdateState
+  }
   tls_fingerprint?: string
   tls_error?: string
   tls_new_fingerprint?: string

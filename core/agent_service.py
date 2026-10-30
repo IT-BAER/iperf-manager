@@ -20,6 +20,7 @@ import atexit
 import ipaddress
 import shutil
 import ssl
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 from pathlib import Path
@@ -140,7 +141,7 @@ class AgentService:
         api_token: str = '',
         tls_dir: str | None = None,
         allow_remote_update: bool = False,
-        update_launcher=None,
+        update_launcher: Callable[[], None] | None = None,
     ):
         self.host = host
         self.allow_remote_update = bool(allow_remote_update)
@@ -268,7 +269,8 @@ class AgentService:
         if self.advertise_ip:
             return self.advertise_ip
         h = (self.host or '').strip()
-        if h and h not in ('0.0.0.0', '127.0.0.1'):
+        # A loopback bind is not reachable from other hosts; advertising a LAN IP would mislead discovery.
+        if h and h != '0.0.0.0':
             return h
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

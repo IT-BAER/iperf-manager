@@ -113,5 +113,16 @@ class AgentUpdateTest(unittest.TestCase):
         self.assertEqual(self.launches, [])
 
 
+class AgentAdvertiseTest(unittest.TestCase):
+    def test_loopback_bind_advertises_loopback(self):
+        with mock.patch.dict(os.environ, {'AGENT_MGMT_IP': ''}):
+            svc = AgentService(host='127.0.0.1', port=9001)
+        self.assertEqual(svc.base_url(), 'http://127.0.0.1:9001')
+
+    def test_explicit_advertise_ip_wins_over_loopback_bind(self):
+        svc = AgentService(host='127.0.0.1', port=9001, advertise_ip='10.0.0.5')
+        self.assertEqual(svc.base_url(), 'http://10.0.0.5:9001')
+
+
 if __name__ == '__main__':
     unittest.main()

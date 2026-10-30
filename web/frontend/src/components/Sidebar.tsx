@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import type { Agent, AgentUpdateState } from '../types'
+import { isNewerVersion } from '../format'
+import type { Agent } from '../types'
 
 interface Props {
   open: boolean
@@ -31,34 +32,17 @@ function RefreshIcon() {
   return <i className="fa-solid fa-rotate-right text-[11px] shrink-0" aria-hidden="true" />
 }
 
-/** True when version a (x.y.z) is newer than b. */
-function isNewer(a: string, b: string): boolean {
-  const pa = a.split('.').map(Number)
-  const pb = b.split('.').map(Number)
-  for (let i = 0; i < 3; i++) {
-    if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0)
-  }
-  return false
-}
-
-function AgentVersionLine({ agent, latest, updating: updatingHere, onUpdate }: {
+function AgentVersionLine({ agent, latest, updating, onUpdate }: {
   agent: Agent
   latest: string | null
   updating: boolean
   onUpdate: () => void
 }) {
   const version = typeof agent.details?.version === 'string' ? agent.details.version : ''
-  const update = (agent.details?.update ?? {}) as AgentUpdateState
+  const update = agent.details?.update ?? {}
   const remoteUpdate = agent.details?.remote_update === true
-  // The agent's own state also covers updates started from another browser or before a reload.
-  // After 15 minutes a pending state is stale: the agent then accepts a new request.
-  // Age is taken from the time this line mounted, so a state going stale while shown clears on reload.
-  const [mountedSec] = useState(() => Date.now() / 1000)
-  const pending = (update.state === 'requested' || update.state === 'running')
-    && mountedSec - (update.started ?? 0) < 15 * 60
-  const updating = updatingHere || pending
   if (!version && !updating) return null
-  const available = !!(version && latest && isNewer(latest, version))
+  const available = !!(version && latest && isNewerVersion(latest, version))
   return (
     <div className="text-xs text-fg-3 mt-1 ml-3.5 flex items-center gap-2 min-w-0">
       {version && <span className="font-mono tabular">v{version}</span>}

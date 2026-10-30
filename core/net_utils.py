@@ -180,6 +180,9 @@ def http_post_json(base, path, payload, timeout=6, api_key=None):
     except TlsPinError:
         _pool.remove(scheme, host, port)
         raise
+    except AgentHTTPError:
+        # The agent has answered; sending the POST again could run it twice.
+        raise
     except (ConnectionError, OSError, RuntimeError, CannotSendRequest, ResponseNotReady):
         # 연결 끊김 → 풀에서 제거 후 새 연결로 재시도
         _pool.remove(scheme, host, port)
@@ -191,6 +194,8 @@ def http_post_json(base, path, payload, timeout=6, api_key=None):
             if 200 <= resp.status < 300:
                 return json.loads(body.decode('utf-8', 'replace'))
             raise AgentHTTPError(resp.status, body)
+        except AgentHTTPError:
+            raise
         except Exception:
             _pool.remove(scheme, host, port)
             # urllib would verify the self-signed agent certificate against CAs and fail.

@@ -1282,9 +1282,10 @@ def delete_auth_session():
 def list_agents():
     with _agents_lock:
         agents = dict(_agents)
-    # Optionally refresh on request
-    if request.args.get("refresh") == "1":
-        _refresh_agents(agents)
+    # Optionally refresh on request: all agents, or only the ids in refresh_ids (comma separated).
+    refresh_ids = [i for i in request.args.get("refresh_ids", "").split(",") if i in agents]
+    if request.args.get("refresh") == "1" or refresh_ids:
+        _refresh_agents({i: agents[i] for i in refresh_ids} if refresh_ids else agents)
         with _agents_lock:
             agents = dict(_agents)
     return jsonify([_public_agent(info) for info in agents.values()])
@@ -1845,6 +1846,8 @@ def meta():
 
 _LATEST_RELEASE_API = "https://api.github.com/repos/IT-BAER/iperf-manager/releases/latest"
 _latest_release_cache: dict = {}
+# Held during the lookup too, so parallel requests wait for one GitHub call instead of racing.
+_latest_release_lock = threading.Lock()
 
 
 def _fetch_latest_release_tag() -> str:
@@ -1857,17 +1860,19 @@ def _fetch_latest_release_tag() -> str:
 @app.route("/api/meta/agent-release", methods=["GET"])
 def latest_agent_release():
     """Latest agent release version from GitHub, cached; null when GitHub is unreachable."""
-    now = time.time()
-    if now >= _latest_release_cache.get("expires", 0):
-        try:
-            tag = _fetch_latest_release_tag()
-        except Exception as exc:
-            print(f"[WARN][agent-release] latest release lookup failed: {exc}")
-            tag = ""
-        version = tag[1:] if re.fullmatch(r"v\d+\.\d+\.\d+", tag) else None
-        # A failed lookup is retried sooner than a successful one is refreshed.
-        _latest_release_cache.update(latest=version, expires=now + (3600 if version else 300))
-    return jsonify({"latest": _latest_release_cache["latest"]})
+    with _latest_release_lock:
+        now = time.time()
+        if now >= _latest_release_cache.get("expires", 0):
+            try:
+                tag = _fetch_latest_release_tag()
+            except Exception as exc:
+                print(f"[WARN][agent-release] latest release lookup failed: {exc}")
+                tag = ""
+            version = tag[1:] if re.fullmatch(r"v\d+\.\d+\.\d+", tag) else None
+            # A failed lookup is retried sooner than a successful one is refreshed.
+            _latest_release_cache.update(latest=version, expires=now + (3600 if version else 300))
+        latest = _latest_release_cache["latest"]
+    return jsonify({"latest": latest})
 
 
 _start_scheduler_worker()

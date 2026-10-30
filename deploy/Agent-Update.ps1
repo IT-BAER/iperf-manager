@@ -22,11 +22,13 @@ $WorkDir   = Join-Path $env:ProgramData "iperf-manager"
 $LogFile   = Join-Path $WorkDir "agent-update.log"
 $StateFile = Join-Path $InstallDir "config\iperf3-agent\update-state.json"
 
-function Write-Log { param([string]$Msg) Add-Content -LiteralPath $LogFile -Value "$(Get-Date -Format s) $Msg" }
+# All log writes go through Add-Content -Encoding UTF8: Windows PowerShell's *>> would append UTF-16.
+function Write-Log { param([string]$Msg) Add-Content -LiteralPath $LogFile -Value "$(Get-Date -Format s) $Msg" -Encoding UTF8 }
 
 $script:Installed = ""
 $script:Target = ""
 $script:BackedUp = $false
+$script:TaskXml = ""
 $script:Started = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 
 function Write-State {
@@ -53,7 +55,7 @@ function Invoke-Mirror {
     param([string]$From, [string]$To)
     $ErrorActionPreference = "Continue"
     # /XJ: never follow junctions. Robocopy exit codes 0-7 mean success.
-    & robocopy.exe $From $To /MIR /XJ /R:1 /W:1 /NP /NFL /NDL *>> $LogFile
+    & robocopy.exe $From $To /MIR /XJ /R:1 /W:1 /NP /NFL /NDL *>&1 | Add-Content -LiteralPath $LogFile -Encoding UTF8
     if ($LASTEXITCODE -ge 8) { throw "robocopy $From -> $To failed (exit code $LASTEXITCODE)" }
 }
 
@@ -80,6 +82,8 @@ function Restore-InstallDir {
     }
     Set-Acl -LiteralPath $InstallDir -AclObject $acl
     Invoke-Mirror -From $RollbackDir -To $InstallDir
+    # The failed installer may have re-registered the task for the new code.
+    if ($script:TaskXml) { Register-ScheduledTask -TaskName $TaskName -Xml $script:TaskXml -Force | Out-Null }
     Start-ScheduledTask -TaskName $TaskName
 }
 
@@ -94,6 +98,8 @@ try {
 
     if ($Ref) {
         if ($Ref -notmatch '^[A-Za-z0-9._/-]+$') { throw "invalid ref: $Ref" }
+        Write-Warning ("Installing $Ref even if it is older than the installed version. Installers before v1.3.0 " +
+            "reset the API firewall rule to any address and store the agent API key where all local users can read it.")
         $script:Target = $Ref
     } else {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -127,6 +133,7 @@ try {
 
     Write-Log "backing up $InstallDir"
     Invoke-Mirror -From $InstallDir -To $RollbackDir
+    $script:TaskXml = Export-ScheduledTask -TaskName $TaskName
     $script:BackedUp = $true
 
     # The release's own installer runs as a child so its 'exit' cannot end this script.
@@ -134,7 +141,8 @@ try {
     $env:IPERF_AGENT_UPDATER = "1"
     # Windows PowerShell turns redirected native stderr into terminating errors under "Stop".
     $ErrorActionPreference = "Continue"
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer.FullName -InstallDir $InstallDir *>> $LogFile
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer.FullName -InstallDir $InstallDir *>&1 |
+        Add-Content -LiteralPath $LogFile -Encoding UTF8
     $installerExit = $LASTEXITCODE
     $ErrorActionPreference = "Stop"
     if ($installerExit -ne 0) { throw "installer exit code $installerExit" }
