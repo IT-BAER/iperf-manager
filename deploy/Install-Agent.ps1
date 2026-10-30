@@ -864,6 +864,6 @@ if ($TokenGenerated) {
     Write-Host ""
 }
 Write-Host "  Verify with:" -ForegroundColor Yellow
-Write-Host "    curl http://localhost:${Port}/status" -ForegroundColor White
-Write-Host "    Invoke-RestMethod http://localhost:${Port}/status" -ForegroundColor White
+Write-Host "    `$key = (Get-Content -Raw '$configFile' | ConvertFrom-Json).api_token" -ForegroundColor White
+Write-Host "    Invoke-RestMethod http://localhost:${Port}/status -Headers @{ 'X-API-Key' = `$key }" -ForegroundColor White
 Write-Host ""

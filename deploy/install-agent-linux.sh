@@ -128,6 +128,15 @@ if $UNINSTALL; then
     fi
     rm -rf "$UPDATER_DIR"
 
+    # The ufw rules were created for the ports in config.json, not for the defaults.
+    if [[ -f "$CONFIG_FILE" ]]; then
+        CFG_PORTS=$(python3 -c 'import json, sys; c = json.load(open(sys.argv[1])); print(c.get("port", 9001), c.get("autostart", "5211,5212"), sep="\t")' "$CONFIG_FILE" 2>/dev/null || true)
+        if [[ -n "$CFG_PORTS" ]]; then
+            $API_PORT_GIVEN || API_PORT=${CFG_PORTS%%$'\t'*}
+            $IPERF_PORTS_GIVEN || IPERF_PORTS=${CFG_PORTS#*$'\t'}
+        fi
+    fi
+
     # Remove firewall rules (ufw)
     if command -v ufw &>/dev/null && ufw status | grep -q "active"; then
         ufw delete allow "$API_PORT/tcp"   2>/dev/null && ok "Removed ufw rule ${API_PORT}/tcp"   || true
@@ -141,13 +150,14 @@ if $UNINSTALL; then
         ok "Removed ufw iperf3 port rules"
     fi
 
-    # Remove runtime directories
-    for dir in "$CONFIG_DIR" "$LOG_DIR"; do
+    # Remove runtime directories; ${CONFIG_DIR} also holds web.env of a dashboard on the same host.
+    for dir in "${CONFIG_DIR}/iperf3-agent" "$LOG_DIR"; do
         if [[ -d "$dir" ]]; then
             rm -rf "$dir"
             ok "Removed $dir"
         fi
     done
+    rmdir "$CONFIG_DIR" 2>/dev/null || true
 
     # Keep repository tree by default to avoid disrupting co-hosted services
     if $PURGE_INSTALL_DIR && [[ -d "$INSTALL_DIR" ]]; then
@@ -412,5 +422,9 @@ fi
 info "Service status:"
 systemctl --no-pager status "$SERVICE_NAME" || true
 echo ""
-info "Verify with: curl -s http://localhost:${API_PORT}/status"
+info "Verify with:"
+cat <<VERIFYEOF
+    TOKEN=\$(sudo sed -n 's/.*"api_token": "\(.*\)".*/\1/p' ${CONFIG_FILE})
+    curl -s -H "X-API-Key: \$TOKEN" http://localhost:${API_PORT}/status
+VERIFYEOF
 echo ""
