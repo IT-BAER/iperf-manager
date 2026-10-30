@@ -13,6 +13,9 @@ and this project adheres to Semantic Versioning.
 - Discovery advertises `https://` agents and updates an existing entry with the same host and port instead of adding a duplicate; it never downgrades a stored `https://` agent.
 - Installers print the agent certificate fingerprint; the Linux installer installs `openssl` when it is missing.
 
+### Fixed
+- `TestConfig.validate()` accepts `https://` server agent URLs; before, it rejected them.
+
 ### Security
 - API keys and test control traffic between dashboard and agents are encrypted once both run this release. Keys that were used over plain HTTP before may have been captured: set new agent tokens after the switch. iperf3 test traffic stays unencrypted (iperf3 limit).
 
