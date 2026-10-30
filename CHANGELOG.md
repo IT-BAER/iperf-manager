@@ -7,6 +7,8 @@ and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-30
+
 ### Added
 - Remote agent update: the dashboard shows each agent's version and an **Update** button when a newer GitHub release exists. The agent endpoint `POST /update` takes no parameters; it starts a separate updater (`iperf-agent-update.service` / scheduled task `iperf-agent-update`) that installs the latest release of `IT-BAER/iperf-manager` with that release's installer. Off by default; enable per agent with `--remote-update yes` / `-RemoteUpdate Yes`. Refused without an agent API token and while a test runs. A failed update restores the previous version and restarts the agent (git checkout and the `iperf-agent` unit on Linux; install folder and `iperf-agent` task on Windows).
 - Agent `/status` reports `version`, `remote_update` and the last update state.
