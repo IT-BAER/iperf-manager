@@ -1,19 +1,19 @@
 # iperf-manager
 
-iperf-manager is a distributed iperf3 orchestration platform with two deployable components: lightweight agents and a Flask + React web dashboard. Agents run on the systems you want to test, while the dashboard discovers them, builds a server/client topology, starts tests, and visualizes live metrics in the browser.
+iperf-manager runs iperf3 tests between many hosts from one web page. It has two parts: lightweight **agents** on the hosts you want to test, and a **web dashboard** (Flask + React) that finds the agents, builds a server/client topology, starts tests and shows live throughput.
 
 ## Features
 
-- Distributed agent orchestration over REST
-- Automatic agent discovery on page load, plus manual Discover and Refresh controls
-- Built-in session-based dashboard authentication with secure cookies, enabled by default
-- Live topology view and throughput charts over Socket.IO
-- TCP and UDP test support
-- Dashboard test modes: `bidirectional`, `upload`, `download`
-- Saved report browser with inline CSV viewing and raw file download
-- CSV, HTML, and ZIP artifacts served from `data/`
-- Zero-pip-dependency agent runtime
-- Linux and Windows agent deployment scripts, plus a Linux web-service helper
+- Agent discovery by UDP broadcast or by configured IP ranges, plus manual add
+- Drag-and-drop topology: one server agent, one or more client agents
+- TCP and UDP tests in `bidirectional`, `upload` and `download` mode
+- Live throughput charts over Socket.IO
+- Scheduled tests with cron expressions
+- Saved reports (CSV, HTML, ZIP) with an inline CSV viewer
+- Dashboard login, on by default
+- HTTPS between dashboard and agents with certificate pinning, and an API key per agent
+- Remote agent update from the dashboard (opt-in per agent)
+- Agent runtime without pip dependencies; installers for Linux (systemd) and Windows (scheduled task)
 
 ## Screenshots
 
@@ -27,41 +27,28 @@ These screenshots were captured from the live local web UI with agent names, IP 
 
 ![Sanitized reports overview](docs/images/reports-overview.png)
 
-## Architecture
+## How it works
 
 ```text
 Browser
-  |
+  |  HTTP (port 5000)
   v
-Web Dashboard (Flask + React)
-  |  REST + Socket.IO
-  +--> Agent A (server)
-  +--> Agent B..N (clients)
-
-Dashboard flow:
-1. Refresh and auto-discover agents on the network
-2. Build a topology with one server and one or more clients
-3. Start iperf3 on the selected agents
-4. Poll live metrics and stream them into the UI
-5. Save test artifacts under data/
+Web dashboard (Flask + React)
+  |  REST over HTTPS (port 9001), discovery over UDP 9999
+  +--> Agent A (iperf3 server)
+  +--> Agent B..N (iperf3 clients)  ---- iperf3 traffic (5211+) ---->  Agent A
 ```
 
 | Component | Description | Entry point |
 |-----------|-------------|-------------|
-| Agent | Headless REST service that manages iperf3 server/client processes | `main_agent.py` |
-| Web Dashboard | Flask + React SPA for discovery, orchestration, live results, and reports | `main_web.py` |
+| Agent | Headless REST service that starts and stops iperf3 servers and clients | `main_agent.py` |
+| Web dashboard | Discovery, test control, live results, schedules and reports | `main_web.py` |
 
-## Quick Start
+## Install
 
-### Prerequisites
+The commands below install the latest release. The [deployment guide](deploy/README-deploy.md) lists every option (ports, API key, version pinning, staged installs) and explains each step.
 
-- Python 3.9+
-- `iperf3` installed on every agent host
-- Node.js only if you are rebuilding the React frontend
-
-### Service Deployment (One-Liners)
-
-Resolve the latest release ref once per shell before running the Linux commands below:
+Set these variables once per Linux shell:
 
 ```bash
 REPO="IT-BAER/iperf-manager"
@@ -69,116 +56,107 @@ REF="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | sed -
 REF="${REF:-main}"
 ```
 
-To track `main` directly instead of the latest release, skip the resolver and force `--ref main` in the installer call:
-
-```bash
-curl -fsSL "https://raw.githubusercontent.com/IT-BAER/iperf-manager/main/deploy/install-web-linux.sh" \
-  | sudo bash -s -- --ref main
-```
-
-#### Linux web dashboard
-
-Install:
+### 1. Web dashboard (Linux)
 
 ```bash
 curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/deploy/install-web-linux.sh" | sudo bash
 ```
 
-Update:
+Open `http://<server-ip>:5000` and log in as `admin` with the password that the installer prints. Save the password; it is shown only once.
 
-```bash
-curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/deploy/install-web-linux.sh" \
-  | sudo bash -s -- --update
-```
+### 2. Agents
 
-Uninstall:
-
-```bash
-curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/deploy/install-web-linux.sh" \
-  | sudo bash -s -- --uninstall
-```
-
-#### Linux agent
-
-Install:
+Linux:
 
 ```bash
 curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/deploy/install-agent-linux.sh" | sudo bash
 ```
 
-Uninstall:
-
-```bash
-curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/deploy/install-agent-linux.sh" \
-  | sudo bash -s -- --uninstall
-```
-
-Add `--purge` to also remove `/opt/iperf-manager`.
-
-#### Windows agent (PowerShell as Administrator)
-
-Install:
+Windows (PowerShell as Administrator):
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$repo='IT-BAER/iperf-manager'; $ref=(Invoke-RestMethod -UseBasicParsing https://api.github.com/repos/$repo/releases/latest).tag_name; if([string]::IsNullOrWhiteSpace($ref)){$ref='main'}; iwr -UseBasicParsing https://raw.githubusercontent.com/$repo/$ref/deploy/Install-Agent.ps1 | iex"
+$ref = (Invoke-RestMethod -UseBasicParsing https://api.github.com/repos/IT-BAER/iperf-manager/releases/latest).tag_name
+Invoke-WebRequest -UseBasicParsing "https://raw.githubusercontent.com/IT-BAER/iperf-manager/$ref/deploy/Install-Agent.ps1" -OutFile "$env:TEMP\Install-Agent.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\Install-Agent.ps1"
 ```
 
-Uninstall:
+Each agent installer prints an **API token** (only on the first install) and a **TLS SHA-256** fingerprint. Save both.
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$repo='IT-BAER/iperf-manager'; $ref=(Invoke-RestMethod -UseBasicParsing https://api.github.com/repos/$repo/releases/latest).tag_name; if([string]::IsNullOrWhiteSpace($ref)){$ref='main'}; iwr -UseBasicParsing https://raw.githubusercontent.com/$repo/$ref/deploy/Install-Agent.ps1 -OutFile $env:TEMP\Install-Agent.ps1; & $env:TEMP\Install-Agent.ps1 -Uninstall"
-```
+### 3. Connect the agents
 
-If Python or Git is missing, the Windows installer attempts to install them automatically.
+1. In the dashboard, agents in the same subnet appear automatically. Add agents in other subnets with **Add Agent** (`https://<agent-ip>:9001`).
+2. Click the key button on each agent row and paste its API token.
+3. Hover over the agent URL and compare the fingerprint with the installer output.
 
-For parameterized install/update commands (token, ports, ref, repo URL, skip build/sync), see [deploy/README-deploy.md](deploy/README-deploy.md).
+To read a token later, see [Add agents to the dashboard](deploy/README-deploy.md#add-agents-to-the-dashboard).
 
-### Required Network Ports (Firewall)
+## Update
 
-At minimum, allow the dashboard host to reach agent management and discovery:
+| Component | How |
+|-----------|-----|
+| Web dashboard | `curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/deploy/install-web-linux.sh" \| sudo bash -s -- --update` |
+| Linux agent | Run the install command again |
+| Windows agent | Download and run the installer again |
+| Any agent with remote update on | Click **Update** next to the agent in the dashboard ([details](deploy/README-deploy.md#remote-update-from-the-dashboard)) |
 
-- UDP `9999` for agent discovery
-- TCP `9001` for agent REST API
+Updates keep the dashboard login, the agent API keys and all settings.
 
-For test traffic, allow iperf3 ports between your selected server and client agents:
+## Uninstall
 
-- TCP and UDP iperf3 port range used by your test config (`base_port` + client count)
-- Dashboard test defaults start from `5211` (the agents also autostart iperf3 on `5211,5212`); many setups allow a wider range such as `5211-5299`
+| Component | Command |
+|-----------|---------|
+| Web dashboard | `curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/deploy/install-web-linux.sh" \| sudo bash -s -- --uninstall` |
+| Linux agent | `sudo bash /opt/iperf-manager/deploy/install-agent-linux.sh --uninstall` |
+| Windows agent | `powershell -NoProfile -ExecutionPolicy Bypass -File C:\iperf-manager\deploy\Install-Agent.ps1 -Uninstall` |
 
-Example firewall rules (segmented setup):
+What each uninstall removes and keeps is listed in the [deployment guide](deploy/README-deploy.md).
 
-- UDP `9999` -> `<IPERF_AGENT_NETWORKS>`
-- TCP `9001` -> `<IPERF_AGENT_NETWORKS>`
-- TCP and UDP `5211-5299` -> `<IPERF_AGENT_NETWORKS>`
+## Network ports
 
-### 1. Start one or more agents
+| Port | Protocol | Direction | Purpose |
+|------|----------|-----------|---------|
+| 5000 | TCP | browser -> dashboard | Web dashboard |
+| 9001 | TCP | dashboard -> agent | Agent REST API |
+| 9999 | UDP | dashboard -> agent | Agent discovery |
+| 5211 and up | TCP and UDP | client agent -> server agent | iperf3 test traffic, one port per client |
+
+The agent installers open only the iperf3 ports `5211,5212` (two clients). For larger tests, see [Network ports and firewall](deploy/README-deploy.md#network-ports-and-firewall).
+
+## Run a test
+
+1. Drag one agent into the server zone and one or more agents into the client zone.
+2. Choose protocol, mode, duration and advanced options.
+3. Start the test and watch live upload and download throughput.
+4. Open the **Reports** tab for saved results. Reports are stored under `data/` on the dashboard host.
+
+To run tests on a schedule, use the **Scheduled Tests** panel: enter a name and a cron expression (5 fields: minute hour day month weekday), and choose a saved profile or a snapshot of the current settings (**Manual Snapshot**). Only one test runs at a time; a schedule that is due while another test runs is skipped.
+
+| Dashboard mode | Description |
+|----------------|-------------|
+| `bidirectional` | Traffic in both directions at the same time (iperf3 `--bidir`, TCP only) |
+| `upload` | Client to server |
+| `download` | Server to client |
+
+## Development
+
+Requirements: Python 3.9 or later, `iperf3` on agent hosts, Node.js 20.19 or 22.12 or later for the frontend.
+
+Run an agent from the checkout (without an API key it accepts every request; set `api_token` in its config, see [Agent configuration](deploy/README-deploy.md#agent-configuration)):
 
 ```bash
 python main_agent.py --host 0.0.0.0 --port 9001
 ```
 
-By default, the agent reads its config from:
-
-- Windows: `%LOCALAPPDATA%\iperf3-agent\config.json`
-- Linux: `~/.config/iperf3-agent/config.json`
-
-The deployment scripts override that location to system-managed paths. See [deploy/README-deploy.md](deploy/README-deploy.md).
-When you use the deployment scripts, they can also generate a random agent API token automatically if you do not pass one explicitly.
-
-### 2. Start the web dashboard
+Run the dashboard:
 
 ```bash
 pip install -r requirements.txt
 python main_web.py --host 127.0.0.1 --port 5000
 ```
 
-Open `http://127.0.0.1:5000`.
+Without configured credentials, the dashboard prints a generated `admin` password that changes on every restart. Dashboard settings and environment variables are listed in [Dashboard settings](deploy/README-deploy.md#dashboard-settings).
 
-Dashboard auth is enabled by default. If you do not set credentials, startup prints a generated `admin` password. When you launch the app directly with `python main_web.py`, that generated password exists only for the current process and rotates on the next restart. For persistent service-managed credentials, configure `DASHBOARD_AUTH_USERNAME` and either `DASHBOARD_AUTH_PASSWORD_HASH` or `DASHBOARD_AUTH_PASSWORD`, or use the Linux setup script, which generates credentials on a fresh install and then preserves the stored hash on later reruns unless you explicitly override the auth settings. Existing credentials are preserved from the active service definition and, when present, `/etc/iperf-manager/web.env`. To opt out completely, set `DASHBOARD_AUTH_DISABLE=1`.
-
-Dashboard private runtime state (stored agent API keys and scheduled jobs) is persisted in `IPERF_MANAGER_STATE_DIR`. Linux service installs default this to `/var/lib/iperf-manager/dashboard` so updates to `/opt/iperf-manager` do not overwrite credentials.
-
-### 3. Rebuild the frontend when you change the React app
+Rebuild the frontend after changes in `web/frontend` (see [web/frontend/README.md](web/frontend/README.md)):
 
 ```bash
 cd web/frontend
@@ -186,141 +164,56 @@ npm install
 npm run build
 ```
 
-If `web/frontend/dist/` is present, Flask serves the built SPA. If it is missing, Flask falls back to the legacy `templates/dashboard.html` template.
+If `web/frontend/dist/` is missing, Flask serves the older `web/templates/dashboard.html` page.
 
-### 4. Run a test
+Run the tests:
 
-1. Let the dashboard auto-discover agents, or use Discover and Refresh manually.
-2. Drag one agent into the server zone and one or more into the client zone.
-3. Choose protocol, mode, duration, and advanced options.
-4. Start the test and watch live upload and download metrics.
-5. Review saved artifacts in the Reports tab.
+```bash
+python -m unittest discover -s . -p "test_*.py"
+```
 
-## Dashboard Test Model
-
-The current React dashboard exposes these modes:
-
-| Dashboard mode | Core mode | Description |
-|----------------|-----------|-------------|
-| `bidirectional` | `bidir` | iperf3 bidirectional mode |
-| `upload` | `up_only` | Client to server only |
-| `download` | `down_only` | Server to client only |
-
-The dashboard sends a config shape like this to `/api/test/start`:
+The dashboard starts a test with `POST /api/test/start`. Example body:
 
 ```json
 {
   "server_agent": "server-agent-id",
-  "server_bind": "",
-  "api_key": "",
   "duration_sec": 10,
   "base_port": 5211,
-  "poll_interval_sec": 1,
   "protocol": "tcp",
   "parallel": 1,
-  "omit_sec": 0,
-  "bitrate": "",
-  "tcp_window": "",
   "mode": "bidirectional",
   "clients": [
-    {
-      "agent": "client-agent-id",
-      "name": "client-1",
-      "server_target": "",
-      "bind": "",
-      "api_key": ""
-    }
+    { "agent": "client-agent-id", "name": "client-1" }
   ]
 }
 ```
 
-## Agent Runtime and API
+Optional fields: `server_bind`, `poll_interval_sec`, `omit_sec`, `bitrate`, `tcp_window`, and per client `server_target` and `bind`.
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `--host` | config value or `0.0.0.0` | Interface to listen on |
-| `--port` | config value or `9001` | REST API port |
-| Advertise management IP | auto-detect | IP returned in discovery responses |
-| iperf3 path | auto-detect | Path to `iperf3` |
-| Autostart ports | `5211,5212` | iperf3 server ports to start automatically |
-| API token | empty | Optional `X-API-Key` header authentication |
-| `tls` | `true` | HTTPS with a self-signed certificate on the API port (plain HTTP still accepted); needs the `openssl` CLI |
-
-Common endpoints:
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/status` | GET | Agent status and metadata |
-| `/metrics` | GET | Live throughput snapshot |
-| `/server/start` | POST | Start iperf3 server ports |
-| `/server/stop` | POST | Stop iperf3 servers |
-| `/client/start` | POST | Start an iperf3 client workload |
-| `/client/stop` | POST | Stop agent-side clients |
-
-When an API token is configured, send it as `X-API-Key`. The dashboard pins each agent's certificate fingerprint on first contact; see [deploy/README-deploy.md](deploy/README-deploy.md#security-notes).
-
-## Reports and Artifacts
-
-- Test artifacts are written under `data/`.
-- The dashboard lists `.csv`, `.html`, and `.zip` report files.
-- The React report viewer renders CSV data inline and supports downloading the raw file.
-- `core/report.py` still contains the standalone HTML report generator used for HTML report output.
-
-## Build and Deploy
-
-Build the Windows agent bundle with PyInstaller:
-
-```bash
-python build.py
-```
-
-Useful options:
-
-```bash
-python build.py --onefile
-python build.py --onedir
-python build.py --no-zip
-```
-
-See [deploy/README-deploy.md](deploy/README-deploy.md) for:
-
-- Linux agent deployment with systemd
-- Windows agent deployment with a scheduled task
-- Linux web-dashboard service setup with `deploy/setup-web-service.sh`
-
-## Project Layout
+### Project layout
 
 ```text
 iperf-manager/
-  main_agent.py
-  main_web.py
-  build.py
+  main_agent.py          agent entry point
+  main_web.py            dashboard entry point
   requirements.txt
   core/
-    agent_service.py
-    test_runner.py
-    net_utils.py
-    csv_recorder.py
-    report.py
-    config_model.py
-    constants.py
-    helpers.py
+    agent_service.py     agent REST API, discovery responder, iperf3 processes
+    agent_config.py      config.json merge used by the installers
+    test_runner.py       test orchestration
+    net_utils.py         HTTP client, TLS pinning
+    csv_recorder.py, report.py, config_model.py, constants.py, helpers.py
   web/
-    app.py
-    frontend/
-      src/
-      dist/
-    templates/
-  data/
-    profiles/
+    app.py               Flask API, Socket.IO, scheduler
+    frontend/            React app (src/, dist/ after build)
+    templates/, static/  fallback page
   deploy/
-    install-agent-linux.sh
-    Install-Agent.ps1
-    install-web-linux.sh
-    setup-web-service.sh
+    install-web-linux.sh, setup-web-service.sh
+    install-agent-linux.sh, Install-Agent.ps1
+    agent-update.sh, Agent-Update.ps1
+  tests/                 unittest suite
+  data/                  reports and profiles (runtime)
 ```
-
-> This is a standalone repository for a server-hosted web dashboard and headless iperf agents.
 
 ## License
 

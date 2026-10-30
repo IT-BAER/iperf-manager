@@ -7,6 +7,8 @@ and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-30
+
 ### Added
 - Remote agent update: the dashboard shows each agent's version and an **Update** button when a newer GitHub release exists. The agent endpoint `POST /update` takes no parameters; it starts a separate updater (`iperf-agent-update.service` / scheduled task `iperf-agent-update`) that installs the latest release of `IT-BAER/iperf-manager` with that release's installer. Off by default; enable per agent with `--remote-update yes` / `-RemoteUpdate Yes`. Refused without an agent API token and while a test runs. A failed update restores the previous version and restarts the agent (git checkout and the `iperf-agent` unit on Linux; install folder and `iperf-agent` task on Windows).
 - Agent `/status` reports `version`, `remote_update` and the last update state.
@@ -18,6 +20,12 @@ and this project adheres to Semantic Versioning.
 - The Windows installer keeps a remote-address restriction on the "iperf-manager API" firewall rule when it recreates the rules.
 - The dashboard no longer sends a POST to an agent again when the agent has answered with an error; before, a failed request such as starting a test could run up to three times.
 - An agent bound to `127.0.0.1` advertises `127.0.0.1` instead of a LAN address it does not listen on.
+- The Linux agent `--uninstall` deleted all of `/etc/iperf-manager`, including the `web.env` of a dashboard on the same host. It now removes only the agent folder `iperf3-agent` there.
+- The Linux agent `--uninstall` removed the ufw rules for the default ports instead of the ports in `config.json`.
+- The "Verify with" command that the agent installers print now sends the API key; before, the agent answered 403.
+
+### Documentation
+- README and deployment guide rewritten: install, update and uninstall per component, all installer options and dashboard settings, API key handling, firewall rules per client count, and troubleshooting. The Windows commands now work in PowerShell; the old one-liners worked only from `cmd.exe`. The README no longer describes `build.py`, which needs an `agent.spec` that is not in the repository.
 
 ### Security
 - The Windows installer limits `C:\iperf-manager` to SYSTEM and Administrators. Before, the folder inherited Modify rights for Authenticated Users from `C:\`, so a local user could change agent code that runs as SYSTEM, and read the agent API key in `config.json`. It also makes Administrators the owner of items a non-admin created in the install and updater folders, deletes links inside them, and refuses a folder that is itself a link.

@@ -63,7 +63,15 @@ npm run preview
 | `src/components/TopologyDiagram.tsx` | Server/client topology and live connection visuals |
 | `src/components/LiveResults.tsx` | Live KPI cards and charts |
 | `src/components/ReportViewer.tsx` | Inline CSV report viewer |
-| `src/components/Sidebar.tsx` | Agent list, discovery, refresh, manual add |
+| `src/components/Sidebar.tsx` | Agent list, discovery, refresh, manual add, API key, certificate trust, remote update |
+| `src/components/Header.tsx` | Top bar with sidebar toggle and profile select, save and delete |
+| `src/components/KPIBar.tsx` | Summary tiles for agents and the running test |
+| `src/components/SchedulePanel.tsx` | Scheduled tests (cron, profile or manual snapshot) |
+| `src/components/LogPanel.tsx` | Test log output |
+| `src/components/Toast.tsx` | Toast notifications |
+| `src/components/SelectInput.tsx` | Shared select control |
+| `src/format.ts` | Number formatting and version comparison |
+| `src/types.ts` | Shared TypeScript types for agents, tests, schedules and auth |
 | `src/api.ts` | Shared fetch helper with auth-required handling |
 | `src/hooks/useSocket.ts` | Auth-aware Socket.IO connection wrapper |
 | `src/index.css` | Shared component classes and dashboard styling |
