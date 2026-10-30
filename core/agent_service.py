@@ -18,6 +18,8 @@ import sys
 import signal
 import atexit
 import ipaddress
+import shutil
+import ssl
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 from pathlib import Path
@@ -31,6 +33,7 @@ from core.helpers import (
     list_local_ipv4,
     list_local_interfaces,
 )
+from core.net_utils import cert_fingerprint
 
 AGENT_VERSION = '6.0.2'
 
@@ -66,6 +69,45 @@ def save_agent_cfg(obj: dict):
         print(f'[WARN] config save failed: {e}')
 
 
+def find_openssl() -> str | None:
+    """Return the openssl CLI on PATH, or the copy that ships with Git for Windows."""
+    found = shutil.which('openssl')
+    if found or not IS_WIN:
+        return found
+    for root in (os.environ.get('ProgramFiles'), os.environ.get('ProgramFiles(x86)')):
+        for sub in (r'Git\mingw64\bin\openssl.exe', r'Git\usr\bin\openssl.exe'):
+            path = os.path.join(root, sub) if root else ''
+            if path and os.path.isfile(path):
+                return path
+    return None
+
+
+def ensure_agent_cert(directory) -> tuple[str, str] | None:
+    """Return (cert, key) in directory, creating a self-signed EC pair when missing.
+
+    Returns None when no openssl CLI is available; the agent then serves plain HTTP only.
+    """
+    cert = os.path.join(directory, 'agent.crt')
+    key = os.path.join(directory, 'agent.key')
+    if os.path.isfile(cert) and os.path.isfile(key):
+        return cert, key
+    openssl = find_openssl()
+    if not openssl:
+        return None
+    cn = re.sub(r'[^A-Za-z0-9.-]', '-', socket.gethostname())[:64] or 'iperf-agent'
+    # MSYS builds of openssl would rewrite '/CN=...' into a Windows path.
+    env = dict(os.environ, MSYS_NO_PATHCONV='1', MSYS2_ARG_CONV_EXCL='*')
+    subprocess.run(
+        [openssl, 'req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1',
+         '-nodes', '-keyout', key + '.tmp', '-out', cert + '.tmp', '-days', '3650', '-subj', f'/CN={cn}'],
+        env=env, check=True, capture_output=True, timeout=60,
+    )
+    os.chmod(key + '.tmp', 0o600)
+    os.replace(key + '.tmp', key)
+    os.replace(cert + '.tmp', cert)
+    return cert, key
+
+
 class AgentService:
     """Manages iperf3 server/client subprocesses with thread-safe state.
 
@@ -85,8 +127,11 @@ class AgentService:
         autostart_ports=None,
         advertise_ip: str | None = None,
         api_token: str = '',
+        tls_dir: str | None = None,
     ):
         self.host = host
+        self.tls_dir = tls_dir
+        self.tls_fingerprint: str | None = None
         self.port = int(port)
         self.iperf3_bin = iperf3_bin or 'iperf3'
         self.autostart_ports = autostart_ports or []
@@ -742,7 +787,7 @@ class AgentService:
         sock.settimeout(0.5)
         name = socket.gethostname()
         base_ip = self._advertise_ip()
-        base = f"http://{base_ip}:{self.port}"
+        base = self.base_url()
         try:
             ip_list = list_local_ipv4(exclude_loopback=True)
         except Exception:
@@ -848,6 +893,10 @@ class AgentService:
                         'mgmt': outer._advertise_ip(),
                         'ips': list_local_ipv4(True),
                         'interfaces': list_local_interfaces(True),
+                        'tls': {
+                            'enabled': outer.tls_fingerprint is not None,
+                            'fingerprint': outer.tls_fingerprint,
+                        },
                     })
                     return
                 if p.path == '/metrics':
@@ -1008,9 +1057,48 @@ class AgentService:
         except Exception:
             pass
 
+        tls_context = None
+        self.tls_fingerprint = None
+        if self.tls_dir:
+            try:
+                pair = ensure_agent_cert(self.tls_dir)
+            except Exception as e:
+                pair = None
+                self._log('WARN', 'tls', f'certificate generation failed: {e}')
+            if pair:
+                tls_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                tls_context.minimum_version = ssl.TLSVersion.TLSv1_2
+                tls_context.load_cert_chain(*pair)
+                self.tls_fingerprint = cert_fingerprint(
+                    ssl.PEM_cert_to_DER_cert(Path(pair[0]).read_text(encoding='ascii'))
+                )
+                self._log('INFO', 'tls', f'HTTPS enabled, certificate SHA-256 {self.tls_fingerprint}')
+            else:
+                self._log('WARN', 'tls', 'openssl not found, serving plain HTTP only')
+
         class ReuseThreadingHTTPServer(ThreadingHTTPServer):
             allow_reuse_address = True
             daemon_threads = True
+
+            def finish_request(self, request, client_address):
+                # One port serves both: a TLS ClientHello starts with byte 0x16.
+                if tls_context is not None:
+                    try:
+                        request.settimeout(10)
+                        first = request.recv(1, socket.MSG_PEEK)
+                    except OSError:
+                        return
+                    if first == b'\x16':
+                        try:
+                            tls_sock = tls_context.wrap_socket(request, server_side=True)
+                        except OSError:
+                            return
+                        try:
+                            self.RequestHandlerClass(tls_sock, client_address, self)
+                        finally:
+                            tls_sock.close()
+                        return
+                self.RequestHandlerClass(request, client_address, self)
 
         self.httpd = ReuseThreadingHTTPServer((self.host, self.port), self._make_handler())
         self.http_thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
@@ -1067,4 +1155,5 @@ class AgentService:
             return sorted([port for port, proc in self.SERVER_PROCS.items() if proc.poll() is None])
 
     def base_url(self) -> str:
-        return f"http://{self._advertise_ip()}:{self.port}"
+        scheme = 'https' if self.tls_fingerprint else 'http'
+        return f"{scheme}://{self._advertise_ip()}:{self.port}"

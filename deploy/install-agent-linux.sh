@@ -171,6 +171,13 @@ else
     ok "iperf3 installed: $(iperf3 --version 2>&1 | head -1)"
 fi
 
+# The agent creates its self-signed HTTPS certificate with the openssl CLI.
+if ! command -v openssl &>/dev/null; then
+    info "Installing openssl via apt …"
+    apt-get update -qq
+    apt-get install -y -qq openssl
+fi
+
 # ── 2. Check Python 3.9+ ────────────────────────────────────────────
 info "Checking Python …"
 PYTHON_BIN=""
@@ -324,6 +331,17 @@ systemctl enable "$SERVICE_NAME" --quiet
 systemctl start "$SERVICE_NAME"
 ok "Service ${SERVICE_NAME} enabled and started"
 
+# The agent writes its certificate on first start; wait for it to report the fingerprint.
+CERT_FILE="${CONFIG_DIR}/iperf3-agent/agent.crt"
+TLS_FINGERPRINT=""
+for _ in $(seq 1 15); do
+    [[ -f "$CERT_FILE" ]] && break
+    sleep 1
+done
+if [[ -f "$CERT_FILE" ]]; then
+    TLS_FINGERPRINT=$($PYTHON_BIN -c 'import hashlib, ssl, sys; d = hashlib.sha256(ssl.PEM_cert_to_DER_cert(open(sys.argv[1]).read())).digest(); print(":".join(f"{b:02X}" for b in d))' "$CERT_FILE")
+fi
+
 # ── 6. Firewall (ufw) ───────────────────────────────────────────────
 if command -v ufw &>/dev/null && ufw status | grep -q "active"; then
     info "Configuring ufw firewall rules …"
@@ -359,7 +377,13 @@ if $TOKEN_GENERATED; then
 else
     echo -e "  API token         : ${CYAN}(provided)${NC}"
 fi
+if [[ -n "$TLS_FINGERPRINT" ]]; then
+    echo -e "  TLS SHA-256       : ${CYAN}${TLS_FINGERPRINT}${NC}"
+fi
 echo ""
+if [[ -z "$TLS_FINGERPRINT" ]]; then
+    warn "No TLS certificate at ${CERT_FILE}: the agent serves plain HTTP only. Check: journalctl -u ${SERVICE_NAME}"
+fi
 
 if $TOKEN_GENERATED; then
     warn "Save this token now. Use it when manually adding the agent in the dashboard so the server can refresh and control the agent securely."

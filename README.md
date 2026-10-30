@@ -244,6 +244,7 @@ The dashboard sends a config shape like this to `/api/test/start`:
 | iperf3 path | auto-detect | Path to `iperf3` |
 | Autostart ports | `5211,5212` | iperf3 server ports to start automatically |
 | API token | empty | Optional `X-API-Key` header authentication |
+| `tls` | `true` | HTTPS with a self-signed certificate on the API port (plain HTTP still accepted); needs the `openssl` CLI |
 
 Common endpoints:
 
@@ -256,7 +257,7 @@ Common endpoints:
 | `/client/start` | POST | Start an iperf3 client workload |
 | `/client/stop` | POST | Stop agent-side clients |
 
-When an API token is configured, send it as `X-API-Key`.
+When an API token is configured, send it as `X-API-Key`. The dashboard pins each agent's certificate fingerprint on first contact; see [deploy/README-deploy.md](deploy/README-deploy.md#security-notes).
 
 ## Reports and Artifacts
 

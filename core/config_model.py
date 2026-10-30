@@ -188,8 +188,8 @@ class TestConfig:
         # Server URL
         if not self.server_agent or self.server_agent == 'http://A-IP:9001':
             errors.append('Server (A) URL is not configured.')
-        elif not self.server_agent.startswith('http://'):
-            errors.append(f'Server URL must start with http:// — got "{self.server_agent}"')
+        elif not self.server_agent.startswith(('http://', 'https://')):
+            errors.append(f'Server URL must start with http:// or https:// — got "{self.server_agent}"')
 
         # Clients
         if not self.clients:

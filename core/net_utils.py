@@ -4,10 +4,12 @@ net_utils.py - 공통 네트워크 유틸리티
 Agent/Dashboard/Controller 에서 공유하는 HTTP 통신 및 메트릭 폴링 함수.
 Keep-Alive 연결 재사용을 통한 폴링 효율 개선 포함.
 """
+import hashlib
 import json
 import os
+import ssl
 import urllib.request
-from http.client import HTTPConnection, CannotSendRequest, ResponseNotReady
+from http.client import HTTPConnection, HTTPSConnection, CannotSendRequest, ResponseNotReady
 from urllib.parse import urlparse
 import threading
 
@@ -20,6 +22,66 @@ def _to_float(x, default=None):
         return default
 
 
+def cert_fingerprint(der: bytes) -> str:
+    """SHA-256 of a DER certificate as colon-separated upper-case hex (openssl style)."""
+    return ':'.join(f'{b:02X}' for b in hashlib.sha256(der).digest())
+
+
+# --- TLS pinning ---
+
+class TlsPinError(OSError):
+    """Agent certificate does not match the pinned fingerprint."""
+
+
+_tls_pins: dict[str, str] = {}      # 'host:port' -> expected fingerprint
+_tls_observed: dict[str, str] = {}  # 'host:port' -> fingerprint seen on the last TLS connect
+
+# Agent certificates are self-signed: trust comes from the pinned fingerprint, not a CA.
+_TLS_CTX = ssl.create_default_context()
+_TLS_CTX.check_hostname = False
+_TLS_CTX.verify_mode = ssl.CERT_NONE
+
+
+def _host_port(base):
+    parsed = urlparse(base.rstrip('/'))
+    scheme = parsed.scheme or 'http'
+    return parsed.hostname or 'localhost', parsed.port or (443 if scheme == 'https' else 80)
+
+
+def set_tls_pin(base, fingerprint):
+    """Pin the expected certificate fingerprint for an agent base URL (falsy clears it)."""
+    host, port = _host_port(base)
+    key = f'{host}:{port}'
+    if _tls_pins.get(key) == (fingerprint or None):
+        return
+    if fingerprint:
+        _tls_pins[key] = fingerprint
+    else:
+        _tls_pins.pop(key, None)
+    _pool.remove('https', host, port)
+
+
+def observed_tls_fingerprint(base):
+    """Fingerprint presented by the agent on the last TLS connect, or None."""
+    host, port = _host_port(base)
+    return _tls_observed.get(f'{host}:{port}')
+
+
+class _PinnedHTTPSConnection(HTTPSConnection):
+    def __init__(self, host, port, timeout):
+        super().__init__(host, port, timeout=timeout, context=_TLS_CTX)
+
+    def connect(self):
+        super().connect()
+        key = f'{self.host}:{self.port}'
+        seen = cert_fingerprint(self.sock.getpeercert(binary_form=True))
+        _tls_observed[key] = seen
+        expected = _tls_pins.get(key)
+        if expected and expected != seen:
+            self.close()
+            raise TlsPinError(f'certificate fingerprint mismatch for {key}')
+
+
 # --- HTTP 연결 풀 (Keep-Alive) ---
 
 class _ConnPool:
@@ -28,11 +90,11 @@ class _ConnPool:
         self._conns = {}
         self._lock = threading.Lock()
 
-    def _key(self, host, port):
-        return f'{host}:{port}'
+    def _key(self, scheme, host, port):
+        return f'{scheme}://{host}:{port}'
 
-    def get(self, host, port, timeout=6):
-        key = self._key(host, port)
+    def get(self, scheme, host, port, timeout=6):
+        key = self._key(scheme, host, port)
         with self._lock:
             conn = self._conns.get(key)
         if conn is not None:
@@ -42,13 +104,16 @@ class _ConnPool:
                 return conn
             except Exception:
                 pass
-        conn = HTTPConnection(host, port, timeout=timeout)
+        if scheme == 'https':
+            conn = _PinnedHTTPSConnection(host, port, timeout=timeout)
+        else:
+            conn = HTTPConnection(host, port, timeout=timeout)
         with self._lock:
             self._conns[key] = conn
         return conn
 
-    def remove(self, host, port):
-        key = self._key(host, port)
+    def remove(self, scheme, host, port):
+        key = self._key(scheme, host, port)
         with self._lock:
             conn = self._conns.pop(key, None)
         if conn:
@@ -85,8 +150,8 @@ def close_pool():
 def http_post_json(base, path, payload, timeout=6, api_key=None):
     """HTTP POST JSON 요청. Keep-Alive 연결 재사용 시도, 실패 시 urllib fallback."""
     parsed = urlparse(base.rstrip('/'))
-    host = parsed.hostname or 'localhost'
-    port = parsed.port or 80
+    scheme = parsed.scheme or 'http'
+    host, port = _host_port(base)
     url_path = (parsed.path or '') + path
     data = json.dumps(payload).encode('utf-8')
     headers = {'Content-Type': 'application/json', 'Connection': 'keep-alive'}
@@ -96,18 +161,21 @@ def http_post_json(base, path, payload, timeout=6, api_key=None):
 
     # Keep-Alive 연결 시도
     try:
-        conn = _pool.get(host, port, timeout)
+        conn = _pool.get(scheme, host, port, timeout)
         conn.request('POST', url_path, body=data, headers=headers)
         resp = conn.getresponse()
         body = resp.read()
         if 200 <= resp.status < 300:
             return json.loads(body.decode('utf-8', 'replace'))
         raise RuntimeError(f'HTTP {resp.status}: {body.decode("utf-8","replace")[:200]}')
+    except TlsPinError:
+        _pool.remove(scheme, host, port)
+        raise
     except (ConnectionError, OSError, RuntimeError, CannotSendRequest, ResponseNotReady):
         # 연결 끊김 → 풀에서 제거 후 새 연결로 재시도
-        _pool.remove(host, port)
+        _pool.remove(scheme, host, port)
         try:
-            conn = _pool.get(host, port, timeout)
+            conn = _pool.get(scheme, host, port, timeout)
             conn.request('POST', url_path, body=data, headers=headers)
             resp = conn.getresponse()
             body = resp.read()
@@ -115,7 +183,10 @@ def http_post_json(base, path, payload, timeout=6, api_key=None):
                 return json.loads(body.decode('utf-8', 'replace'))
             raise RuntimeError(f'HTTP {resp.status}: {body.decode("utf-8","replace")[:200]}')
         except Exception:
-            _pool.remove(host, port)
+            _pool.remove(scheme, host, port)
+            # urllib would verify the self-signed agent certificate against CAs and fail.
+            if scheme == 'https':
+                raise
             # 최종 fallback: urllib
             url = base.rstrip('/') + path
             req = urllib.request.Request(url, data=data, headers=headers)
@@ -126,8 +197,8 @@ def http_post_json(base, path, payload, timeout=6, api_key=None):
 def http_get_json(base, path, timeout=1.5, api_key=None):
     """HTTP GET JSON 요청. Keep-Alive 연결 재사용."""
     parsed = urlparse(base.rstrip('/'))
-    host = parsed.hostname or 'localhost'
-    port = parsed.port or 80
+    scheme = parsed.scheme or 'http'
+    host, port = _host_port(base)
     url_path = (parsed.path or '') + path
     headers = {'Connection': 'keep-alive'}
     token = _resolve_api_key(api_key)
@@ -135,24 +206,27 @@ def http_get_json(base, path, timeout=1.5, api_key=None):
         headers['X-API-Key'] = token
 
     try:
-        conn = _pool.get(host, port, timeout)
+        conn = _pool.get(scheme, host, port, timeout)
         conn.request('GET', url_path, headers=headers)
         resp = conn.getresponse()
         body = resp.read()
         if 200 <= resp.status < 300:
             return json.loads(body.decode('utf-8', 'replace'))
         return None
+    except TlsPinError:
+        _pool.remove(scheme, host, port)
+        return None
     except (ConnectionError, OSError, CannotSendRequest, ResponseNotReady):
-        _pool.remove(host, port)
+        _pool.remove(scheme, host, port)
         try:
-            conn = _pool.get(host, port, timeout)
+            conn = _pool.get(scheme, host, port, timeout)
             conn.request('GET', url_path, headers=headers)
             resp = conn.getresponse()
             body = resp.read()
             if 200 <= resp.status < 300:
                 return json.loads(body.decode('utf-8', 'replace'))
         except Exception:
-            _pool.remove(host, port)
+            _pool.remove(scheme, host, port)
         return None
     except Exception:
         return None
