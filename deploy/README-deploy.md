@@ -151,7 +151,36 @@ Uninstall:
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$repo='IT-BAER/iperf-manager'; $ref=(Invoke-RestMethod -UseBasicParsing https://api.github.com/repos/$repo/releases/latest).tag_name; if([string]::IsNullOrWhiteSpace($ref)){$ref='main'}; iwr -UseBasicParsing https://raw.githubusercontent.com/$repo/$ref/deploy/Install-Agent.ps1 -OutFile $env:TEMP\Install-Agent.ps1; & $env:TEMP\Install-Agent.ps1 -Uninstall"
 ```
 
+For a staged local tree on Windows, copy the repo files into `C:\iperf-manager` first and then run (as Administrator):
+
+```powershell
+$env:IPERF_MANAGER_SKIP_REPO_SYNC = "1"; & C:\iperf-manager\deploy\Install-Agent.ps1
+```
+
+### Remote update from the dashboard
+
+Agents can install the latest GitHub release when you click **Update** next to the agent in the dashboard. It is off by default. Turn it on per agent with the installer:
+
+```bash
+curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/deploy/install-agent-linux.sh" \
+  | sudo bash -s -- --remote-update yes
+```
+
+```powershell
+& $env:TEMP\Install-Agent.ps1 -RemoteUpdate Yes
+```
+
+- The agent needs an API token; without one, `/update` is refused.
+- The dashboard sends no version, URL or command. The agent starts a separate updater (`iperf-agent-update.service` on Linux, scheduled task `iperf-agent-update` on Windows), which reads the latest release of `IT-BAER/iperf-manager` from GitHub and runs that release's own installer. Both the agent host and the dashboard host need HTTPS access to `api.github.com` and `github.com`.
+- The update is refused while a test runs on the agent. The agent restarts during the update.
+- Reruns of the installers keep the existing `config.json` values (port, iperf3 ports, advertise IP, remote update) unless you pass the option again. The Windows installer also keeps a remote-address restriction on the API firewall rule.
+- Log: `/var/log/iperf-manager/agent-update.log` (Linux), `C:\ProgramData\iperf-manager\agent-update.log` (Windows). State: `update-state.json` next to `config.json`.
+- Manual run as root/Administrator for one ref: `/usr/local/lib/iperf-manager/agent-update.sh --ref v1.3.0` or `C:\ProgramData\iperf-manager\Agent-Update.ps1 -Ref v1.3.0`.
+
 ## Security Notes
+
+- Remote update runs the installer of the latest GitHub release as root (Linux) or SYSTEM (Windows). Turn it on only for agents where you accept that trust in the GitHub repository. There is no signature check beyond HTTPS.
+- The Windows installer restricts the install directory (`C:\iperf-manager`) and `C:\ProgramData\iperf-manager` to SYSTEM and Administrators. Before, a folder under `C:\` inherited Modify rights for Authenticated Users, so any local user could change code that runs as SYSTEM.
 
 - Agent install scripts now generate a random API token when you do not pass `--token` or `-Token` explicitly.
 - Save the generated token and re-add the agent through the dashboard's manual Add Agent form with that API key so the dashboard server can refresh and control the protected agent.

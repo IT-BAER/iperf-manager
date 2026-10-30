@@ -12,10 +12,12 @@ import io
 import ipaddress
 import json
 import os
+import re
 import socket
 import secrets
 import threading
 import time
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -360,7 +362,7 @@ def _public_agent(info: dict) -> dict:
     if isinstance(details, dict):
         public["details"] = {
             key: details[key]
-            for key in ("version", "ips", "interfaces")
+            for key in ("version", "ips", "interfaces", "remote_update", "update")
             if key in details
         }
     return public
@@ -1355,6 +1357,20 @@ def remove_agent(agent_id):
     return jsonify({"error": "not found"}), 404
 
 
+@app.route("/api/agents/<agent_id>/update", methods=["POST"])
+def update_agent_release(agent_id):
+    """Ask the agent to install the latest release; nothing from this request reaches the agent."""
+    with _agents_lock:
+        info = dict(_agents.get(agent_id, {}))
+    if not info:
+        return jsonify({"error": "not found"}), 404
+    try:
+        result = http_post_json(info["url"], "/update", {}, timeout=10, api_key=info.get("api_key") or None)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 502
+    return jsonify(result), 202
+
+
 @app.route("/api/agents/discover", methods=["POST"])
 def discover_agents():
     body = request.get_json(silent=True) or {}
@@ -1814,6 +1830,32 @@ def meta():
         "protocols": PROTOCOLS,
         "default_base_port": DEFAULT_BASE_PORT,
     })
+
+
+_LATEST_RELEASE_API = "https://api.github.com/repos/IT-BAER/iperf-manager/releases/latest"
+_latest_release_cache: dict = {}
+
+
+def _fetch_latest_release_tag() -> str:
+    req = urllib.request.Request(_LATEST_RELEASE_API, headers={"User-Agent": "iperf-manager-dashboard",
+                                                               "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(req, timeout=5) as rsp:
+        return str(json.loads(rsp.read().decode("utf-8")).get("tag_name", ""))
+
+
+@app.route("/api/meta/agent-release", methods=["GET"])
+def latest_agent_release():
+    """Latest agent release version from GitHub, cached; null when GitHub is unreachable."""
+    now = time.time()
+    if now >= _latest_release_cache.get("expires", 0):
+        try:
+            tag = _fetch_latest_release_tag()
+        except Exception:
+            tag = ""
+        version = tag[1:] if re.fullmatch(r"v\d+\.\d+\.\d+", tag) else None
+        # A failed lookup is retried sooner than a successful one is refreshed.
+        _latest_release_cache.update(latest=version, expires=now + (3600 if version else 300))
+    return jsonify({"latest": _latest_release_cache["latest"]})
 
 
 _start_scheduler_worker()

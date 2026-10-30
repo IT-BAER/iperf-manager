@@ -1,9 +1,12 @@
 import { useState } from 'react'
-import type { Agent } from '../types'
+import type { Agent, AgentUpdateState } from '../types'
 
 interface Props {
   open: boolean
   agents: Agent[]
+  latestAgentVersion: string | null
+  updatingAgents: ReadonlyMap<string, number>
+  onUpdateAgent: (id: string) => void
   onRefresh: () => void
   onAdd: (url: string, name: string, apiKey: string) => void
   onUpdateAgentKey: (id: string, apiKey: string) => void
@@ -28,7 +31,63 @@ function RefreshIcon() {
   return <i className="fa-solid fa-rotate-right text-[11px] shrink-0" aria-hidden="true" />
 }
 
-export function Sidebar({ open, agents, onRefresh, onAdd, onUpdateAgentKey, onTrustCertificate, onRemove, onDiscover, isDiscovering, isRefreshing }: Props) {
+/** True when version a (x.y.z) is newer than b. */
+function isNewer(a: string, b: string): boolean {
+  const pa = a.split('.').map(Number)
+  const pb = b.split('.').map(Number)
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0)
+  }
+  return false
+}
+
+function AgentVersionLine({ agent, latest, updating, onUpdate }: {
+  agent: Agent
+  latest: string | null
+  updating: boolean
+  onUpdate: () => void
+}) {
+  const version = typeof agent.details?.version === 'string' ? agent.details.version : ''
+  const update = (agent.details?.update ?? {}) as AgentUpdateState
+  const remoteUpdate = agent.details?.remote_update === true
+  if (!version && !updating) return null
+  const available = !!(version && latest && isNewer(latest, version))
+  return (
+    <div className="text-xs text-fg-3 mt-1 ml-3.5 flex items-center gap-2 min-w-0">
+      {version && <span className="font-mono tabular">v{version}</span>}
+      {updating ? (
+        <span className="flex items-center gap-1.5 text-accent"><Spinner /><span>Updating…</span></span>
+      ) : available && (
+        <>
+          <span className="text-warn truncate" title={`Latest release: v${latest}`}>v{latest} available</span>
+          {remoteUpdate ? (
+            <button
+              onClick={() => {
+                if (window.confirm(`Update "${agent.name}" from v${version} to the latest release (v${latest})?\n\n`
+                  + 'The agent restarts. Running tests on this agent are refused until the update ends.')) onUpdate()
+              }}
+              className="underline hover:text-accent shrink-0"
+            >
+              Update
+            </button>
+          ) : (
+            <span
+              className="shrink-0 cursor-help"
+              title="Remote update is off for this agent. Enable it with the installer option --remote-update yes (Linux) or -RemoteUpdate Yes (Windows)."
+            >
+              <i className="fa-solid fa-circle-info text-[10px]" aria-label="Remote update off" />
+            </span>
+          )}
+        </>
+      )}
+      {!updating && update.state === 'failed' && (
+        <span className="text-err truncate" title={update.error}>Update failed</span>
+      )}
+    </div>
+  )
+}
+
+export function Sidebar({ open, agents, latestAgentVersion, updatingAgents, onUpdateAgent, onRefresh, onAdd, onUpdateAgentKey, onTrustCertificate, onRemove, onDiscover, isDiscovering, isRefreshing }: Props) {
   const [addUrl, setAddUrl] = useState('')
   const [addName, setAddName] = useState('')
   const [addApiKey, setAddApiKey] = useState('')
@@ -209,6 +268,12 @@ export function Sidebar({ open, agents, onRefresh, onAdd, onUpdateAgentKey, onTr
                     : <i className="fa-solid fa-lock-open text-[9px] mr-1 text-warn" aria-label="No TLS" />}
                   {agent.url}
                 </div>
+                <AgentVersionLine
+                  agent={agent}
+                  latest={latestAgentVersion}
+                  updating={updatingAgents.has(agent.id)}
+                  onUpdate={() => onUpdateAgent(agent.id)}
+                />
                 {agent.tls_error && (
                   <div className="text-xs text-err mt-1 ml-3.5 flex items-center gap-2">
                     <span className="truncate">TLS: {agent.tls_error}</span>

@@ -10,12 +10,18 @@ set -euo pipefail
 API_TOKEN=""
 API_PORT=9001
 IPERF_PORTS="5211,5212"
+# Reruns keep the values in config.json unless the option is passed again.
+API_PORT_GIVEN=false
+IPERF_PORTS_GIVEN=false
+REMOTE_UPDATE=""
 INSTALL_DIR="/opt/iperf-manager"
 CONFIG_DIR="/etc/iperf-manager"
 CONFIG_FILE="${CONFIG_DIR}/iperf3-agent/config.json"
 LOG_DIR="/var/log/iperf-manager"
 SERVICE_NAME="iperf-agent"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+UPDATE_SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}-update.service"
+UPDATER_DIR="/usr/local/lib/iperf-manager"
 REPO_URL="https://github.com/IT-BAER/iperf-manager.git"
 REPO_REF="${IPERF_MANAGER_REF:-}"
 UNINSTALL=false
@@ -61,6 +67,7 @@ Options:
   --token <api_key>          API key for agent authentication
   --port <port>              REST API port (default: 9001)
   --iperf-ports <p1,p2,...>  iperf3 autostart ports (default: 5211,5212)
+  --remote-update <yes|no>   Allow the dashboard to update this agent (default: no; reruns keep the value)
     --ref <name>               Repository ref (tag or branch)
     --uninstall                Remove service, config, log dir, and firewall rules
     --purge                    With --uninstall, also remove ${INSTALL_DIR}
@@ -78,8 +85,11 @@ EOF
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --token)       API_TOKEN="$2";   shift 2 ;;
-        --port)        API_PORT="$2";    shift 2 ;;
-        --iperf-ports) IPERF_PORTS="$2"; shift 2 ;;
+        --port)        API_PORT="$2"; API_PORT_GIVEN=true; shift 2 ;;
+        --iperf-ports) IPERF_PORTS="$2"; IPERF_PORTS_GIVEN=true; shift 2 ;;
+        --remote-update)
+            [[ "${2:-}" == yes || "${2:-}" == no ]] || die "--remote-update needs yes or no"
+            REMOTE_UPDATE="$2"; shift 2 ;;
         --uninstall)   UNINSTALL=true;   shift   ;;
         --purge)       PURGE_INSTALL_DIR=true; shift ;;
         -h|--help)     usage ;;
@@ -110,12 +120,13 @@ if $UNINSTALL; then
         systemctl disable "$SERVICE_NAME" && ok "Service disabled"
     fi
 
-    # Remove unit file
-    if [[ -f "$SERVICE_FILE" ]]; then
-        rm -f "$SERVICE_FILE"
+    # Remove unit files and the updater
+    if [[ -f "$SERVICE_FILE" || -f "$UPDATE_SERVICE_FILE" ]]; then
+        rm -f "$SERVICE_FILE" "$UPDATE_SERVICE_FILE"
         systemctl daemon-reload
-        ok "Systemd unit removed"
+        ok "Systemd units removed"
     fi
+    rm -rf "$UPDATER_DIR"
 
     # Remove firewall rules (ufw)
     if command -v ufw &>/dev/null && ufw status | grep -q "active"; then
@@ -263,19 +274,34 @@ mkdir -p "${INSTALL_DIR}/data"
 # We set LOCALAPPDATA=/etc/iperf-manager in the service unit so the
 # config resolves to /etc/iperf-manager/iperf3-agent/config.json
 
-cat > "$CONFIG_FILE" <<CFGEOF
-{
-  "autostart": "${IPERF_PORTS}",
-  "bind_host": "0.0.0.0",
-  "port": ${API_PORT},
-  "iperf3_path": "iperf3",
-  "advertise_ip": "",
-  "api_token": "${API_TOKEN}"
-}
-CFGEOF
-
-chmod 600 "$CONFIG_FILE"
+CONFIG_ARGS=()
+$API_PORT_GIVEN && CONFIG_ARGS+=(--port "$API_PORT")
+$IPERF_PORTS_GIVEN && CONFIG_ARGS+=(--autostart "$IPERF_PORTS")
+[[ -n "$REMOTE_UPDATE" ]] && CONFIG_ARGS+=(--remote-update "$REMOTE_UPDATE")
+(cd "$INSTALL_DIR" && AGENT_CONFIG_API_TOKEN="$API_TOKEN" "$PYTHON_BIN" -m core.agent_config "$CONFIG_FILE" "${CONFIG_ARGS[@]}")
+# Firewall rules and the summary use the effective values, which may come from an earlier run.
+IFS=$'\t' read -r API_PORT IPERF_PORTS REMOTE_UPDATE < <("$PYTHON_BIN" -c 'import json, sys; c = json.load(open(sys.argv[1])); print(c["port"], c["autostart"], "yes" if c.get("allow_remote_update") is True else "no", sep="\t")' "$CONFIG_FILE")
 ok "Config written to ${CONFIG_FILE}"
+
+# ── 4b. Updater (started by the agent's /update endpoint) ───────────
+mkdir -p "$UPDATER_DIR"
+cp "${INSTALL_DIR}/deploy/agent-update.sh" "${UPDATER_DIR}/agent-update.sh.tmp"
+chmod 755 "${UPDATER_DIR}/agent-update.sh.tmp"
+# rename, not overwrite: a running update keeps reading its own copy.
+mv -f "${UPDATER_DIR}/agent-update.sh.tmp" "${UPDATER_DIR}/agent-update.sh"
+cat > "$UPDATE_SERVICE_FILE" <<UPDEOF
+[Unit]
+Description=iperf-manager Agent updater (latest release)
+Documentation=https://github.com/IT-BAER/iperf-manager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=${UPDATER_DIR}/agent-update.sh
+TimeoutStartSec=900
+UPDEOF
+ok "Updater installed (${UPDATE_SERVICE_FILE}), remote update: ${REMOTE_UPDATE}"
 
 # ── 5. Create systemd service ───────────────────────────────────────
 info "Creating systemd service …"
