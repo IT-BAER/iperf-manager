@@ -3,6 +3,7 @@ import os
 import socket
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -51,6 +52,50 @@ class _Relay:
                     s.shutdown(socket.SHUT_RDWR)
                 except OSError:
                     pass
+
+    def sent(self):
+        with self._lock:
+            return b''.join(self._sent)
+
+    def close(self):
+        self._srv.close()
+
+
+class _FakeAgent:
+    """Records what the dashboard sends. Fails every TLS handshake; answers plain HTTP with
+    plain_reply, or stays silent when plain_reply is None."""
+
+    def __init__(self, plain_reply=None):
+        self._reply = plain_reply
+        self._sent = []
+        self._lock = threading.Lock()
+        self._srv = socket.create_server(('127.0.0.1', 0))
+        self.port = self._srv.getsockname()[1]
+        threading.Thread(target=self._accept, daemon=True).start()
+
+    def _accept(self):
+        while True:
+            try:
+                conn, _ = self._srv.accept()
+            except OSError:
+                return
+            threading.Thread(target=self._serve, args=(conn,), daemon=True).start()
+
+    def _serve(self, conn):
+        with conn:
+            try:
+                data = b''
+                while chunk := conn.recv(65536):
+                    data += chunk
+                    with self._lock:
+                        self._sent.append(chunk)
+                    if self._reply is not None and data[:1] == b'\x16':
+                        return
+                    if self._reply is not None and b'\r\n\r\n' in data:
+                        conn.sendall(self._reply)
+                        return
+            except OSError:
+                pass
 
     def sent(self):
         with self._lock:
@@ -174,12 +219,63 @@ class DashboardTlsTest(unittest.TestCase):
         self.assertEqual(trusted['tls_fingerprint'], new_svc.tls_fingerprint)
         self.assertFalse(trusted['tls_error'])
 
+    def test_unanswered_tls_handshake_never_falls_back_to_plain_http_with_key(self):
+        fake = _FakeAgent()
+        self.addCleanup(fake.close)
+        agent = self.client.post('/api/agents', json={'url': f'http://127.0.0.1:{fake.port}',
+                                                      'api_key': 'secret'}).get_json()
+        self.assertEqual(agent['status'], 'offline')
+        self.assertNotIn(b'secret', fake.sent())
+
+    def test_agent_that_demands_tls_never_gets_the_key_in_clear_text(self):
+        fake = _FakeAgent(plain_reply=b'HTTP/1.1 426 Upgrade Required\r\nContent-Type: application/json\r\n'
+                                      b'Content-Length: 22\r\nConnection: close\r\n\r\n{"error": "use https"}')
+        self.addCleanup(fake.close)
+        agent = self.client.post('/api/agents', json={'url': f'http://127.0.0.1:{fake.port}',
+                                                      'api_key': 'secret'}).get_json()
+        self.assertEqual((agent['url'], agent['status']), (f'https://127.0.0.1:{fake.port}', 'offline'))
+        self.assertNotIn(b'secret', fake.sent())
+
+    def test_restored_http_entry_switches_to_https_without_a_ui_refresh(self):
+        relay = _Relay(self.port)
+        self.addCleanup(relay.close)
+        url = f'http://127.0.0.1:{relay.port}'
+        self.app.AGENTS_STATE_FILE.write_text(
+            json.dumps([{'id': 'a1', 'url': url, 'name': 'a', 'api_key': 'secret'}]), encoding='utf-8')
+        self.app._load_agents_state()
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            with self.app._agents_lock:
+                entry = dict(self.app._agents['a1'])
+            if entry['tls_fingerprint']:
+                break
+            time.sleep(0.1)
+        self.assertEqual((entry['url'], entry['tls_fingerprint']),
+                         (f'https://127.0.0.1:{relay.port}', self.svc.tls_fingerprint))
+        self.assertNotIn(b'secret', relay.sent())
+
+    def test_starting_a_test_never_sends_the_key_over_plain_http(self):
+        relay = _Relay(self.port)
+        self.addCleanup(relay.close)
+        with self.app._agents_lock:
+            self.app._agents['a1'] = {'id': 'a1', 'url': f'http://127.0.0.1:{relay.port}', 'name': 'a',
+                                      'status': 'online', 'last_seen': None, 'api_key': 'secret',
+                                      'tls_fingerprint': '', 'details': {}}
+        rsp = self.client.post('/api/test/start', json={'server_agent': 'a1', 'clients': [{'agent': 'a1'}],
+                                                        'duration_sec': 1})
+        self.assertEqual(rsp.status_code, 200)
+        self.app._test_thread.join(timeout=60)
+        self.assertNotIn(b'secret', relay.sent())
+        with self.app._agents_lock:
+            self.assertEqual(self.app._agents['a1']['url'], f'https://127.0.0.1:{relay.port}')
+
     def test_discovered_https_agent_updates_existing_http_entry(self):
-        # No key: the dashboard cannot read /status, so the entry stays http:// until discovery.
+        # Added while the agent is down, so the entry stays http:// until discovery finds it.
+        self.agents.pop().stop()
         agent = self.client.post('/api/agents', json={'url': self.http_url}).get_json()
         self.assertEqual(agent['url'], self.http_url)
         disc_port = _free_port()
-        self._restart_agent('cert-a', discover_port=disc_port)
+        self._start_agent('cert-a', discover_port=disc_port)
         orig_port = self.app.DISCOVER_PORT
         self.app.DISCOVER_PORT = disc_port
         os.environ['DASHBOARD_DISCOVERY_CIDRS'] = '127.0.0.1'

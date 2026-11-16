@@ -7,9 +7,10 @@ Keep-Alive 연결 재사용을 통한 폴링 효율 개선 포함.
 import hashlib
 import json
 import os
+import socket
 import ssl
 import urllib.request
-from http.client import HTTPConnection, HTTPSConnection, CannotSendRequest, ResponseNotReady
+from http.client import HTTPConnection, HTTPException, HTTPSConnection, CannotSendRequest, ResponseNotReady
 from urllib.parse import urlparse
 import threading
 
@@ -74,6 +75,35 @@ def observed_tls_fingerprint(base):
     """Fingerprint presented by the agent on the last TLS connect, or None."""
     host, port = _host_port(base)
     return _tls_observed.get(f'{host}:{port}')
+
+
+def agent_transport(base, timeout=2.0):
+    """How an agent at base speaks, found without sending an API key.
+
+    'tls': TLS handshake works, or plain HTTP answers 426 (agent demands TLS).
+    'plain': plain HTTP answers and TLS does not. None: nothing answers.
+    """
+    host, port = _host_port(base)
+    try:
+        raw = socket.create_connection((host, port), timeout=timeout)
+    except OSError:
+        return None
+    try:
+        with _TLS_CTX.wrap_socket(raw):
+            return 'tls'
+    except OSError:
+        pass
+    finally:
+        raw.close()
+    conn = HTTPConnection(host, port, timeout=timeout)
+    try:
+        conn.request('GET', '/status')
+        status = conn.getresponse().status
+    except (OSError, HTTPException):
+        return None
+    finally:
+        conn.close()
+    return 'tls' if status == 426 else 'plain'
 
 
 class _PinnedHTTPSConnection(HTTPSConnection):

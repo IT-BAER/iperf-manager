@@ -80,7 +80,7 @@ Invoke-WebRequest -UseBasicParsing "https://raw.githubusercontent.com/IT-BAER/ip
 powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\Install-Agent.ps1"
 ```
 
-Each agent installer prints an **API token** (only on the first install) and a **TLS SHA-256** fingerprint. Save both.
+Each agent installer prints a **TLS SHA-256** fingerprint and, on the first install, the command to read the generated **API token**. Keep the fingerprint for step 3.
 
 ### 3. Connect the agents
 
@@ -88,7 +88,7 @@ Each agent installer prints an **API token** (only on the first install) and a *
 2. Click the key button on each agent row and paste its API token.
 3. Hover over the agent URL and compare the fingerprint with the installer output.
 
-To read a token later, see [Add agents to the dashboard](deploy/README-deploy.md#add-agents-to-the-dashboard).
+To read a token, see [Add agents to the dashboard](deploy/README-deploy.md#add-agents-to-the-dashboard).
 
 ## Update
 

@@ -401,8 +401,7 @@ echo -e "  API port          : ${CYAN}${API_PORT}/tcp${NC}"
 echo -e "  Discovery port    : ${CYAN}9999/udp${NC}"
 echo -e "  iperf3 ports      : ${CYAN}${IPERF_PORTS}${NC}"
 if $TOKEN_GENERATED; then
-    echo -e "  API token         : ${YELLOW}${API_TOKEN}${NC}"
-    echo -e "  Token source      : ${YELLOW}generated automatically${NC}"
+    echo -e "  API token         : ${YELLOW}generated, stored in ${CONFIG_FILE}${NC}"
 else
     echo -e "  API token         : ${CYAN}(provided)${NC}"
 fi
@@ -414,8 +413,12 @@ if [[ -z "$TLS_FINGERPRINT" ]]; then
     warn "No TLS certificate at ${CERT_FILE}: the agent serves plain HTTP only. Check: journalctl -u ${SERVICE_NAME}"
 fi
 
+# The token is never printed: installer output often ends up in logs or files.
 if $TOKEN_GENERATED; then
-    warn "Save this token now. Use it when manually adding the agent in the dashboard so the server can refresh and control the agent securely."
+    warn "Add the agent in the dashboard with the API token from ${CONFIG_FILE}. Read it with:"
+    cat <<TOKENEOF
+    sudo sed -n 's/.*"api_token": "\(.*\)".*/\1/p' ${CONFIG_FILE}
+TOKENEOF
 fi
 
 # Show service status

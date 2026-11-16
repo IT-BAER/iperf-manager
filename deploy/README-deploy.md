@@ -61,9 +61,9 @@ To install a specific tag or branch:
 
 | Installer | How to pin a ref |
 |-----------|------------------|
-| `install-web-linux.sh` | `--ref v1.3.0` (or `--branch v1.3.0`) |
-| `install-agent-linux.sh` | `--ref v1.3.0`, or environment variable `IPERF_MANAGER_REF=v1.3.0` |
-| `Install-Agent.ps1` | environment variable only: `$env:IPERF_MANAGER_REF = 'v1.3.0'` before you run the script |
+| `install-web-linux.sh` | `--ref v1.3.1` (or `--branch v1.3.1`) |
+| `install-agent-linux.sh` | `--ref v1.3.1`, or environment variable `IPERF_MANAGER_REF=v1.3.1` |
+| `Install-Agent.ps1` | environment variable only: `$env:IPERF_MANAGER_REF = 'v1.3.1'` before you run the script |
 
 To follow `main` instead of releases, download the script from `main` and pass `--ref main`:
 
@@ -211,7 +211,7 @@ curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/deploy/install-agen
 
 The installer installs `iperf3` and `openssl`, clones the repository to `/opt/iperf-manager`, writes the config, starts the `iperf-agent` service and opens the ports in ufw (when ufw is active). At the end it prints:
 
-- **API token**: a generated key, shown only on this first run. Save it; the dashboard needs it to control the agent (see [Add agents to the dashboard](#add-agents-to-the-dashboard)).
+- **API token**: on the first run, where the generated key is stored and the command to read it. The installer never prints the key itself, because installer output often ends up in logs. The dashboard needs the key to control the agent (see [Add agents to the dashboard](#add-agents-to-the-dashboard)).
 - **TLS SHA-256**: the certificate fingerprint. Compare it with the fingerprint the dashboard shows.
 
 Install with options:
@@ -274,7 +274,7 @@ Run it:
 powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\Install-Agent.ps1"
 ```
 
-The installer installs Python and Git when they are missing, downloads `iperf3.exe`, sets up `C:\iperf-manager`, registers the scheduled tasks, creates the firewall rules and starts the agent. Like the Linux installer, it prints the **API token** (first run only) and the **TLS SHA-256** fingerprint.
+The installer installs Python and Git when they are missing, downloads `iperf3.exe`, sets up `C:\iperf-manager`, registers the scheduled tasks, creates the firewall rules and starts the agent. Like the Linux installer, it prints where the **API token** is stored with the command to read it (first run only), and the **TLS SHA-256** fingerprint.
 
 ### Install with parameters
 
@@ -293,7 +293,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\Install-Agent.ps1
 | `-InstallDir <path>` | `C:\iperf-manager` | Install directory |
 | `-Uninstall` | - | Remove the agent (see below) |
 
-To pin a version, set `$env:IPERF_MANAGER_REF = 'v1.3.0'` in the same PowerShell window before you run the script.
+To pin a version, set `$env:IPERF_MANAGER_REF = 'v1.3.1'` in the same PowerShell window before you run the script.
 
 ### Update
 
@@ -328,7 +328,7 @@ The installer limits `C:\iperf-manager` and `C:\ProgramData\iperf-manager` to SY
 
 An agent without the right key shows as offline or answers `403 forbidden`.
 
-**Read the API key later.** The installer shows a generated key only once. Afterwards, read it from the config (root or Administrator only):
+**Read the API key.** The installers do not print the key. Read it from the config (root or Administrator only):
 
 ```bash
 sudo sed -n 's/.*"api_token": "\(.*\)".*/\1/p' /etc/iperf-manager/iperf3-agent/config.json
@@ -357,7 +357,7 @@ How it works:
 - The agent restarts during the update. Do not start tests on it until the update ends.
 - A failed update restores the previous version: on Linux the git checkout and the `iperf-agent` unit file, on Windows the install folder and the `iperf-agent` task. The dashboard then shows "Update failed"; hover over it for the error.
 - Log: `/var/log/iperf-manager/agent-update.log` (Linux), `C:\ProgramData\iperf-manager\agent-update.log` (Windows). State: `update-state.json` next to `config.json`.
-- Manual run for one ref, as root or Administrator: `/usr/local/lib/iperf-manager/agent-update.sh --ref v1.3.0` or `C:\ProgramData\iperf-manager\Agent-Update.ps1 -Ref v1.3.0`.
+- Manual run for one ref, as root or Administrator: `/usr/local/lib/iperf-manager/agent-update.sh --ref v1.3.1` or `C:\ProgramData\iperf-manager\Agent-Update.ps1 -Ref v1.3.1`.
 
 **Downgrade warning:** installers before v1.3.0 store the agent API key in the systemd unit (Linux), or in a machine environment variable and in `start-agent.cmd` (Windows). Local users can read all of these. The old Windows installer also resets the "iperf-manager API" firewall rule to any remote address. After a downgrade, check both by hand, or install v1.3.0 or later again.
 
@@ -418,7 +418,7 @@ Stop-ScheduledTask -TaskName iperf-agent; Start-ScheduledTask -TaskName iperf-ag
 
 ## Verify an agent
 
-Every agent API call needs the API key, also `/status`. Plain HTTP on the same port works for local checks.
+Every agent API call needs the API key, also `/status`. Plain HTTP on the same port works only from the agent host itself (loopback); other hosts get `426 Upgrade Required` and must use HTTPS.
 
 Linux:
 
@@ -478,8 +478,9 @@ Set-NetFirewallRule -DisplayName "iperf-manager API (TCP 9001)" -RemoteAddress 1
 ## Security notes
 
 - **Agent API key:** the installers generate a random key on the first install and keep it on reruns. The key is stored only in `config.json`, readable by root or Administrators only. The agent never reads the old copies in the systemd unit, `start-agent.cmd` or the machine variable `AGENT_API_KEY`; the v1.3.0 installers remove them.
-- **TLS:** agents serve HTTPS on the API port with a self-signed certificate (`agent.crt` and `agent.key` next to `config.json`), created with the `openssl` CLI on first start. The Linux installer installs `openssl`; on Windows the agent uses `openssl.exe` from `PATH` or from Git for Windows. Without `openssl`, the agent logs a warning and serves plain HTTP only.
-- **Certificate pinning:** the same port still answers plain HTTP, so older dashboards keep working. The dashboard switches an agent to `https://` as soon as the agent reports TLS, never switches back, and pins the certificate SHA-256 fingerprint on first contact (trust on first use).
+- **TLS:** agents serve HTTPS on the API port with a self-signed certificate (`agent.crt` and `agent.key` next to `config.json`), created on first start with the `openssl` CLI when it is on `PATH` (or comes with Git for Windows), otherwise by the agent's own Python code (`core/selfsigned.py`). Windows agents get HTTPS also without Git for Windows.
+- **Plain HTTP:** an agent with TLS answers plain HTTP from other hosts with `426 Upgrade Required` and does not run the request. Plain HTTP from the agent host itself (loopback) still works for local checks. Dashboards before v1.2.1 only speak plain HTTP and cannot control such agents.
+- **Certificate pinning:** before the dashboard sends a key, it checks without the key how the agent answers. It uses `https://` when the TLS handshake works or the agent answers `426`, plain HTTP only for agents without TLS, and sends nothing to an agent that does not answer. It does this when it starts, on every agent refresh and before each test, never switches back, and pins the certificate SHA-256 fingerprint on first contact (trust on first use).
 - **Certificate change:** when an agent certificate changes (reinstall, deleted `agent.crt`), the dashboard marks the agent offline with "certificate fingerprint changed". Compare the new fingerprint with the installer output, then trust it in the dashboard.
 - **Old keys:** API keys that were sent over plain HTTP before the switch to HTTPS may have been captured. Set new keys after all agents and the dashboard use HTTPS.
 - **Test traffic:** iperf3 test traffic is not encrypted (iperf3 limit).
@@ -516,7 +517,8 @@ $env:IPERF_MANAGER_REF = $ref; powershell -NoProfile -ExecutionPolicy Bypass -Fi
 | Agent is offline, API unreachable | Check `systemctl status iperf-agent` or the scheduled task, and TCP 9001 in the firewall |
 | `{"error": "forbidden"}` or agent offline after adding | Missing or wrong API key. Set the key with the key button on the agent row; read it as shown in [Add agents](#add-agents-to-the-dashboard) |
 | "certificate fingerprint changed" | The agent has a new certificate (reinstall, deleted `agent.crt`). Compare the fingerprint with the installer output, then trust it |
-| Installer warns "No TLS certificate" | `openssl` is missing. Linux: `apt install openssl`; Windows: install Git for Windows. Then restart the agent |
+| Installer warns "No TLS certificate" | The agent could not create its certificate. Read the agent log (`journalctl -u iperf-agent`, or `C:\iperf-manager\logs`), then restart the agent |
+| `426` with `{"error": "use https"}` | A client used plain HTTP to an agent with TLS. Use `https://<agent-ip>:9001`; dashboards before v1.2.1 need an update |
 | No **Update** button, only an info icon | Remote update is off. Rerun the installer with `--remote-update yes` / `-RemoteUpdate Yes` |
 | "Update failed" | Read `agent-update.log` (see [Remote update](#remote-update-from-the-dashboard)). The previous version is restored |
 | Test fails to start or hangs at 0 | `iperf3` missing on an agent, or iperf3 ports blocked. With more clients than `--iperf-ports` entries, open more ports (see [Network ports](#network-ports-and-firewall)) |

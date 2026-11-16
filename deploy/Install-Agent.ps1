@@ -823,7 +823,7 @@ if ($taskState -eq "Running") {
     Write-Warn "Task state: $taskState (may take a moment to start)"
 }
 
-# The agent writes its HTTPS certificate on first start (openssl from PATH or Git for Windows).
+# The agent writes its HTTPS certificate on first start (openssl when found, else its own Python code).
 $certFile = Join-Path $ConfigDir "agent.crt"
 for ($i = 0; $i -lt 15 -and -not (Test-Path $certFile); $i++) { Start-Sleep -Seconds 1 }
 $tlsFingerprint = $null
@@ -848,8 +848,7 @@ Write-Host "  API port          : ${Port}/tcp" -ForegroundColor Cyan
 Write-Host "  Discovery port    : 9999/udp" -ForegroundColor Cyan
 Write-Host "  iperf3 ports      : $IperfPorts" -ForegroundColor Cyan
 if ($TokenGenerated) {
-    Write-Host "  API token         : $Token" -ForegroundColor Yellow
-    Write-Host "  Token source      : generated automatically" -ForegroundColor Yellow
+    Write-Host "  API token         : generated, stored in $configFile" -ForegroundColor Yellow
 } else {
     Write-Host "  API token         : (provided)" -ForegroundColor Cyan
 }
@@ -858,11 +857,13 @@ if ($tlsFingerprint) {
 }
 Write-Host ""
 if (-not $tlsFingerprint) {
-    Write-Warn "No TLS certificate at ${certFile}: the agent serves plain HTTP only. Install Git for Windows (it ships openssl.exe) or add openssl to PATH, then restart the task."
+    Write-Warn "No TLS certificate at ${certFile}: the agent serves plain HTTP only. Check the agent log in $LogDir."
     Write-Host ""
 }
+# The token is never printed: installer output often ends up in logs or files.
 if ($TokenGenerated) {
-    Write-Warn "Save this token now. Use it when manually adding the agent in the dashboard so the server can refresh and control the agent securely."
+    Write-Warn "Add the agent in the dashboard with the API token from ${configFile}. Read it with:"
+    Write-Host "    (Get-Content -Raw '$configFile' | ConvertFrom-Json).api_token" -ForegroundColor White
     Write-Host ""
 }
 Write-Host "  Verify with:" -ForegroundColor Yellow

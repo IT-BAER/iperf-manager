@@ -36,6 +36,7 @@ from core.helpers import (
     list_local_interfaces,
 )
 from core.net_utils import cert_fingerprint
+from core.selfsigned import generate_self_signed
 
 # --- config persistence ---
 # Prefer installer-provided override when available (especially for Windows
@@ -82,26 +83,31 @@ def find_openssl() -> str | None:
     return None
 
 
-def ensure_agent_cert(directory) -> tuple[str, str] | None:
+def ensure_agent_cert(directory) -> tuple[str, str]:
     """Return (cert, key) in directory, creating a self-signed EC pair when missing.
 
-    Returns None when no openssl CLI is available; the agent then serves plain HTTP only.
+    Uses the openssl CLI when present, otherwise core.selfsigned (standard library only).
     """
     cert = os.path.join(directory, 'agent.crt')
     key = os.path.join(directory, 'agent.key')
     if os.path.isfile(cert) and os.path.isfile(key):
         return cert, key
     openssl = find_openssl()
-    if not openssl:
-        return None
     cn = re.sub(r'[^A-Za-z0-9.-]', '-', socket.gethostname())[:64] or 'iperf-agent'
-    # MSYS builds of openssl would rewrite '/CN=...' into a Windows path.
-    env = dict(os.environ, MSYS_NO_PATHCONV='1', MSYS2_ARG_CONV_EXCL='*')
-    subprocess.run(
-        [openssl, 'req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1',
-         '-nodes', '-keyout', key + '.tmp', '-out', cert + '.tmp', '-days', '3650', '-subj', f'/CN={cn}'],
-        env=env, check=True, capture_output=True, timeout=60,
-    )
+    if openssl:
+        # MSYS builds of openssl would rewrite '/CN=...' into a Windows path.
+        env = dict(os.environ, MSYS_NO_PATHCONV='1', MSYS2_ARG_CONV_EXCL='*')
+        subprocess.run(
+            [openssl, 'req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1',
+             '-nodes', '-keyout', key + '.tmp', '-out', cert + '.tmp', '-days', '3650', '-subj', f'/CN={cn}'],
+            env=env, check=True, capture_output=True, timeout=60,
+        )
+    else:
+        cert_pem, key_pem = generate_self_signed(cn)
+        fd = os.open(key + '.tmp', os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, 'wb') as f:
+            f.write(key_pem)
+        Path(cert + '.tmp').write_bytes(cert_pem)
     os.chmod(key + '.tmp', 0o600)
     os.replace(key + '.tmp', key)
     os.replace(cert + '.tmp', cert)
@@ -117,6 +123,42 @@ def launch_updater():
     proc = subprocess.run(cmd, capture_output=True, timeout=30, creationflags=CREATE_NO_WINDOW if IS_WIN else 0)
     if proc.returncode != 0:
         raise RuntimeError(f'updater start failed (exit code {proc.returncode})')
+
+
+def _is_loopback(host: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(host.split('%', 1)[0])
+    except ValueError:
+        return False
+    return (getattr(ip, 'ipv4_mapped', None) or ip).is_loopback
+
+
+class _PlainHttpRefused(BaseHTTPRequestHandler):
+    """Answers 426 to plain HTTP from other hosts while TLS is on; the request is not handled."""
+    timeout = 10
+
+    def log_message(self, fmt, *args):
+        return
+
+    def handle_one_request(self):
+        self.close_connection = True
+        self.raw_requestline = self.rfile.readline(65537)
+        if not self.raw_requestline or not self.parse_request():
+            return
+        try:
+            length = int(self.headers.get('Content-Length') or 0)
+        except ValueError:
+            length = 0
+        if 0 < length <= 1 << 20:
+            # Read the body so closing the socket does not reset the connection before the reply.
+            self.rfile.read(length)
+        body = b'{"error": "use https"}'
+        self.send_response(426)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        self.wfile.write(body)
 
 
 class AgentService:
@@ -1112,7 +1154,7 @@ class AgentService:
                 )
                 self._log('INFO', 'tls', f'HTTPS enabled, certificate SHA-256 {self.tls_fingerprint}')
             else:
-                self._log('WARN', 'tls', 'openssl not found, serving plain HTTP only')
+                self._log('WARN', 'tls', 'no certificate, serving plain HTTP only')
 
         class ReuseThreadingHTTPServer(ThreadingHTTPServer):
             allow_reuse_address = True
@@ -1135,6 +1177,9 @@ class AgentService:
                             self.RequestHandlerClass(tls_sock, client_address, self)
                         finally:
                             tls_sock.close()
+                        return
+                    if not _is_loopback(client_address[0]):
+                        _PlainHttpRefused(request, client_address, self)
                         return
                 self.RequestHandlerClass(request, client_address, self)
 

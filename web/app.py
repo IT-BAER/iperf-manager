@@ -34,7 +34,8 @@ except ImportError:
 
 # ── Core imports (read-only, no modifications) ──────────────────────────
 from core.net_utils import (
-    AgentHTTPError, http_get_json, http_post_json, poll_metrics, set_tls_pin, observed_tls_fingerprint,
+    AgentHTTPError, agent_transport, http_get_json, http_post_json, poll_metrics, set_tls_pin,
+    observed_tls_fingerprint,
 )
 from core.test_runner import run_test
 from core.constants import (
@@ -335,6 +336,10 @@ def _load_agents_state():
 
     with _agents_lock:
         _agents.update(restored)
+    # Switch http:// entries to https now, not at the first logged-in UI refresh.
+    plain = {aid: info for aid, info in restored.items() if info["url"].startswith("http://")}
+    if plain:
+        threading.Thread(target=_refresh_agents, args=(plain,), name="agent-upgrade", daemon=True).start()
 
 
 def _find_agent_by_endpoint(url: str) -> dict:
@@ -744,7 +749,6 @@ def _start_scheduler_worker() -> None:
     _scheduler_thread.start()
 
 
-_load_agents_state()
 _load_schedules_state()
 
 
@@ -793,15 +797,17 @@ def _refresh_agent(aid: str, info: dict) -> dict:
     pin = str(info.get("tls_fingerprint", "") or "")
     set_tls_pin(url, pin)
     if url.startswith("http://"):
-        # Try TLS first so the key crosses the network in clear text only for agents without TLS.
-        # Once https works, the entry switches for good and never goes back.
-        https_url = "https://" + url[len("http://"):]
-        set_tls_pin(https_url, pin)
-        st = _check_agent(https_url, api_key)
-        if st:
-            url = https_url
-        else:
+        # The key crosses the network in clear text only for agents that answer plain HTTP and
+        # not TLS. Once TLS works, the entry switches to https for good and never goes back.
+        transport = agent_transport(url)
+        if transport == "tls":
+            url = "https://" + url[len("http://"):]
+            set_tls_pin(url, pin)
             st = _check_agent(url, api_key)
+        elif transport == "plain" and not pin:
+            st = _check_agent(url, api_key)
+        else:
+            st = None
     else:
         st = _check_agent(url, api_key)
 
@@ -1129,6 +1135,11 @@ def _metrics_poller(config: dict, stop_ev: threading.Event):
 def _run_test_thread(config: dict):
     """Background thread that runs a test and emits Socket.IO lifecycle events."""
     global _test_state, _current_csv, _poller_thread
+
+    # Agents still stored as http:// (offline at startup) must not get the key in clear text.
+    with _agents_lock:
+        plain = {aid: info for aid, info in _agents.items() if info["url"].startswith("http://")}
+    _refresh_agents(plain)
 
     # Normalize frontend config into run_test format
     cfg = _normalize_config(config)
@@ -1875,6 +1886,7 @@ def latest_agent_release():
     return jsonify({"latest": latest})
 
 
+_load_agents_state()
 _start_scheduler_worker()
 
 

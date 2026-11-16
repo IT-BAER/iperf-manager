@@ -8,6 +8,9 @@ import unittest
 from http.client import HTTPConnection, HTTPSConnection
 
 from core.agent_service import AgentService, find_openssl
+from core.helpers import list_local_ipv4
+
+_LAN_IP = next((ip for ip in list_local_ipv4() if not ip.startswith('127.')), '')
 
 
 def _free_port():
@@ -58,13 +61,31 @@ class AgentTlsTest(unittest.TestCase):
         status, _body, _der = self._https_status('')
         self.assertEqual(status, 403)
 
-    def test_plain_http_still_served_on_same_port(self):
+    def test_plain_http_from_loopback_still_served_on_same_port(self):
         conn = HTTPConnection('127.0.0.1', self.port, timeout=5)
         conn.request('GET', '/status', headers={'X-API-Key': 'secret'})
         resp = conn.getresponse()
         resp.read()
         conn.close()
         self.assertEqual(resp.status, 200)
+
+    # Windows would show a firewall prompt for a listener on a LAN address.
+    @unittest.skipIf(os.name == 'nt' or not _LAN_IP, 'needs POSIX and a non-loopback IPv4 address')
+    def test_plain_http_from_another_host_gets_426(self):
+        port = _free_port()
+        svc = AgentService(host=_LAN_IP, port=port, api_token='secret', tls_dir=self._dir.name)
+        svc.DISCOVER_PORT = _free_port()
+        svc.start()
+        self.addCleanup(svc.stop)
+        for method, body in (('GET', None), ('POST', b'{"ports": [5201]}')):
+            conn = HTTPConnection(_LAN_IP, port, timeout=5)
+            conn.request(method, '/status' if method == 'GET' else '/server/start', body=body,
+                         headers={'X-API-Key': 'secret', 'Content-Type': 'application/json'})
+            resp = conn.getresponse()
+            payload = json.loads(resp.read())
+            conn.close()
+            self.assertEqual((resp.status, payload), (426, {'error': 'use https'}))
+        self.assertEqual(svc.current_servers(), [])
 
     def test_advertised_base_url_uses_https(self):
         self.assertTrue(self.svc.base_url().startswith('https://'))
