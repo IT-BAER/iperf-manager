@@ -7,8 +7,16 @@ and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-11-16
+
 ### Fixed
 - The Windows installer left explicit permissions on items inside the install folder, for example `BUILTIN\Users` read and create rights on a tree copied together with its ACLs. It now resets every item that has explicit entries, so the whole folder is SYSTEM and Administrators only.
+- Agents without the `openssl` CLI, for example on Windows without Git for Windows, served plain HTTP only. They now create their certificate with built-in Python code and serve HTTPS.
+
+### Security
+- The dashboard sent the agent API key over plain HTTP to agents stored as `http://` until a logged-in UI refresh switched them to HTTPS, for example in scheduled tests after a dashboard restart, and whenever an HTTPS check failed. It now checks without the key how an agent answers, switches `http://` entries to HTTPS at startup and before every test, uses plain HTTP only for agents without TLS, and sends nothing to agents that do not answer.
+- An agent with TLS answers plain HTTP from other hosts with `426 Upgrade Required` and does not run the request. Plain HTTP from the agent host itself still works for local checks. Dashboards before v1.2.1 only speak plain HTTP and cannot control such agents.
+- The agent installers no longer print a generated API key, which ended up in logs and redirected output. They print where the key is stored and the command to read it.
 
 ## [1.3.0] - 2026-10-30
 
